@@ -1,5 +1,5 @@
 # MOF Recommender System
-### (Order not finalized) Arni Sturluson, Grant McConachie, Samuel Hough, Cory Simon
+### (Order not finalized) Arni Sturluson, Grant McConachie, Samuel Hough, Melanie Huynh, Cory Simon
 
 The goal of this project is to create a recommender system for metal-organic frameworks (MOFs) in terms of adsorption of gas molecules.
 
