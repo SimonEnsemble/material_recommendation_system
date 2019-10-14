@@ -8,20 +8,20 @@ using LinearAlgebra
 include("recsys_funcs.jl")
 
 
-henry_df = CSV.read(joinpath("..","data","henry_matrix_df_l.csv"))
+henry_df = CSV.read(joinpath("..","data","henry_matrix_df_l_5.csv"))
 gases = names(henry_df)[2:end]
 materials = henry_df[:,1]
 
-H = convert(Array{Union{Float64, Missing}, 2}, henry_df[2:end, 2:end])
+H = convert(Array{Union{Float64, Missing}, 2}, henry_df[1:end, 2:end])
 #H[83,8] = missing
 log_H = log10.(H)
 #M, G, train_error = ALS(log_H, 5, [2.0, 0.01], 1e-5, maxiter=50000)
 
-fold_matrix = k_fold_split(log_H, 3)
+#fold_matrix = k_fold_split(log_H, 3)
 
-_r = [4]
-_λ₁ = [2.0]
-_λ₂ = [1.0]
+_r = [2]
+_λ₁ = [3.0, 5.0]
+_λ₂ = [4.25, 14.25]
 n_cv = 0
 CV_dict = Dict{AbstractString, Any}()
 
@@ -29,10 +29,14 @@ for r in _r
     for λ₁ in _λ₁
         for λ₂ in _λ₂
             global n_cv += 1
-            test_error, parity_pred = cross_validation(log_H, fold_matrix, r, λ₁, λ₂)
-#            test_error, parity_pred = LOO_cross_validation(log_H, r, λ₁, λ₂)
+#            test_error, parity_pred = cross_validation(log_H, fold_matrix, r, λ₁, λ₂)
+            test_error, parity_pred = LOO_cross_validation(log_H, r, λ₁, λ₂)
+#            gas_mean_parity_pred = mean_cross_validation(log_H, fold_matrix, "gas")
+#            mof_mean_parity_pred = mean_cross_validation(log_H, fold_matrix, "mof")
             CV_dict[string(n_cv) * "_err"] = test_error
             CV_dict[string(n_cv) * "_pred"] = parity_pred
+#            CV_dict[string(n_cv) * "_gmpred"] = gas_mean_parity_pred
+#            CV_dict[string(n_cv) * "_mmpred"] = mof_mean_parity_pred
             CV_dict[string(n_cv) * "_lambda1"] = λ₁
             CV_dict[string(n_cv) * "_lambda2"] = λ₂
             CV_dict[string(n_cv) * "_r"] = r
@@ -40,7 +44,7 @@ for r in _r
     end
 end
 
-json_string = JSON.json(CV_dict)
-outfile = open("CV_dict_drasl.json", "w")
-print(outfile, json_string)
-close(outfile)
+#json_string = JSON.json(CV_dict)
+#outfile = open("CV_dict_test.json", "w")
+#print(outfile, json_string)
+#close(outfile)
