@@ -10,3 +10,7 @@ The [NIST/ARPA-E Database of Novel and Emerging Adsorbent Materials](https://ads
 `HenryMatrix.ipynb` grabs the isotherm data from the NIST Database and constructs a fully formed matrix that is used for the recommender system.
 
 `HenryFitting.ipynb` tests various methods to fit the Henry constants. Within, we use a set of 24 adsorption isotherms that we have manually fitted to compare the different methods.
+
+`RecommendationSystem.ipynb` creates the recommender system from the Henry coefficient matrix (created in `HenryMatrix.ipynb`).
+
+`julia_code/*.jl` contains Julia code used for parallel cross validation workflow.
