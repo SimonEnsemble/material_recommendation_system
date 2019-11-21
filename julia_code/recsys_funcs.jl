@@ -4,9 +4,9 @@ using HTTP
 using Printf
 using LinearAlgebra
 using Statistics
-using PyPlot
 using Random
-
+using JLD2
+using FileIO
 
 function k_fold_split(H::Array{Union{Float64, Missing}, 2}, k::Int, max_iter::Int=1000)
     @assert k > 1 "Choose a `k` greater than 1, otherwise this function is pointless."
@@ -49,8 +49,7 @@ function k_fold_split(H::Array{Union{Float64, Missing}, 2}, k::Int, max_iter::In
     return fold_matrix
 end
 
-function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}, error_threshold::Float64, convergence_threshold::Float64=1e-6, maxiter::Int=20000, verbose::Bool=true,
-                        regularize_bias::Bool=true)
+function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}, error_threshold::Float64, convergence_threshold::Float64=1e-6, maxiter::Int=20000, verbose::Bool=true)
     @assert length(λ) == 2 "There should be two λ values, one for each latent matrix."
     n = 0
     train_error_array = Array{Float64, 1}()
@@ -69,21 +68,17 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
     G = rand(r, n_g) .- 0.5
     mu = rand(1, n_m) .- 0.5
     gamma = rand(1, n_g) .- 0.5
-    hbar = missing_mean(H, 2)
-    hbar = mean(hbar)
-    Im = λ[1] * Array{Float64, 2}(I, r, r)
-    Ig = λ[2] * Array{Float64, 2}(I, r, r)
-    bias_λ = deepcopy(λ)
-    if !regularize_bias
-        bias_λ = [0.0, 0.0]
-    end
+    hbar = mean(H[.!ismissing.(H)])
+    Im = n_g / n_m * λ[1] * Array{Float64, 2}(I, r, r)
+    Ig = λ[1] * Array{Float64, 2}(I, r, r)
+    bias_λ = [n_g / n_m * λ[2], λ[2]]
 
     if verbose
         @printf("M shape: (%d, %d)\tG shape: (%d, %d)\n", size(M)[1], size(M)[2], size(G)[1], size(G)[2])
     end
 
     vector_to_pick = vcat([(m, "m") for m = 1:n_m], [(g, "g") for g = 1:n_g])
-    while train_error > error_threshold
+    while loss > error_threshold
         shuffle!(vector_to_pick)
         for vector in vector_to_pick
             if vector[2] == "m"
@@ -112,11 +107,11 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
         append!(train_error_array, train_error)
         error_diff = abs(prev_error - train_error)
         prev_loss = loss
-        loss = 0.5 * sum((actual-pred).^2) + 0.5 * λ[1] * (sum([norm(M[:,m])^2 for m = 1:n_m]) + norm(mu)^2) + 0.5 * λ[2] * (sum([norm(G[:,g])^2 for g = 1:n_g]) + norm(gamma)^2)
+        loss = 0.5 * sum((actual-pred).^2) + 0.5 * λ[1] * (n_g / n_m * sum([norm(M[:,m])^2 for m = 1:n_m]) + sum([norm(G[:,g]) for g = 1:n_g])) + 0.5 * λ[2] * (n_g / n_m * norm(mu)^2 + norm(gamma)^2)
         append!(loss_arr, loss)
         loss_diff = prev_loss - loss
         if n % 1000 == 0 && verbose
-            @printf("Train error on iteration %d: %.3f\n---------------\n", n, train_error)
+            @printf("Train loss on iteration %d: %.3f\n---------------\n", n, loss)
         end
 
         if error_diff < convergence_threshold
@@ -124,7 +119,7 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
             if convergence_count > 199
                 if verbose
                     @printf("Training has converged after %d iterations. See `convergence` parameter for convergence procedure.\n", n)
-                    @printf("Train error: %.3f\n", train_error)
+                    @printf("Train loss: %.3f\n", loss)
                 end
                 break
             end
@@ -144,12 +139,12 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
 
     if verbose
         fig, ax = plt.subplots(figsize=(8,6))
-        ax.plot(collect(1:length(train_error_array)), train_error_array, color="red")
+        ax.plot(collect(1:length(loss_arr)), loss_arr, color="red")
         ax.set_xlabel("Iterations")
         ax.set_ylabel("Train Loss")
         plt.grid(true)
         plt.tight_layout()
-        plt.savefig("asdf.png", format="png", dpi=300)
+        plt.savefig("asdf2.png", format="png", dpi=300)
     end
     return M, G, mu, gamma, train_error_array[end], loss_arr[end], hbar
 end
@@ -172,6 +167,100 @@ function cross_validation(H::Array{Union{Float64, Missing}, 2}, fold_matrix::Arr
     return test_error, parity_prediction
 end
 
+
+function write_submit_file(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64, idx1::Int, idx2::Int)
+    jobscriptdir = "jobz"
+    if ! isdir(jobscriptdir)
+        mkdir(jobscriptdir)
+    end
+	filename = @sprintf("LOO_%d_%.3f_%.3f_%d_%d", r, λ₁, λ₂, idx1, idx2)
+#	@printf("Running the following job: %s\n", filename)
+
+    submit_file = open(filename * ".sh", "w")
+    @printf(submit_file,
+    """
+    #!/bin/bash
+
+    # use current working directory for input and output
+    # default is to use the users home directory
+    #\$ -cwd
+
+    # name of this job
+    #\$ -N %s
+
+    #\$ -pe thread 1 # use 1 thread/core per job
+    
+    # send stderror to this file
+    #\$ -e jobz/%s.e
+    #\$ -o jobz/%s.o
+
+    /nfs/stak/users/sturlusa/julia-1.1.0/bin/julia run_loo.jl %d %f %f %d %d
+    """,
+    filename, filename, filename, r, λ₁, λ₂, idx1, idx2)
+    close(submit_file)
+    return filename * ".sh"
+end
+
+function concatenate_data(file_root::AbstractString, H_shape::Tuple{Int, Int})
+	correct_files = [file for file in readdir("results") if occursin(file_root, file)]
+	n = length(correct_files)
+	parity_pred = Array{Union{Float64, Missing}, 2}(undef, H_shape[1], H_shape[2])
+	err = Array{Float64, 1}(undef, n)
+	loss = Array{Float64, 1}(undef, n)
+
+	for (i, file) in enumerate(correct_files)
+		data = CSV.read("results/" * file)
+		idx1 = parse(Int, split(split(file, ".csv")[1], "_")[end-1])
+		idx2 = parse(Int, split(split(file, ".csv")[1], "_")[end])
+		err[i] = data[!, :err][1]	
+		loss[i] = data[!, :loss][1]	
+		parity_pred[idx1, idx2] = data[!, :parpred][1]
+	end
+	output_filename = file_root * ".jld2"
+	save(output_filename, Dict("err" => err, "loss" => loss, "paritypred" => parity_pred))
+	for file in correct_files
+		run(`rm -f results/$file`)
+		outfile = split(file, ".csv")[1] * ".o"
+		errfile = split(file, ".csv")[1] * ".e"
+		run(`rm -f jobz/$outfile`)
+		run(`rm -f jobz/$errfile`)
+	end
+	return
+end
+
+function LOO_for_cluster(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64)
+    non_missing_indices = findall(.!ismissing.(H))
+	n = length(non_missing_indices)
+
+    for (i, index) in enumerate(non_missing_indices)
+		filename = @sprintf("LOO_%d_%.3f_%.3f_%d_%d", r, λ₁, λ₂, index[1], index[2])
+		if any(occursin.(filename, readdir("results")))	|| any(occursin.(@sprintf("LOO_%d_%.3f_%.3f.jld2", r, λ₁, λ₂), readdir()))
+			continue
+		end
+		submit_file_name = write_submit_file(H, r, λ₁, λ₂, index[1], index[2])
+        run(`qsub $submit_file_name`)
+        sleep(0.25)
+		run(`rm -f $submit_file_name`)
+    end
+	file_root = @sprintf("LOO_%d_%.3f_%.3f_", r, λ₁, λ₂)
+
+	n_iter = 0
+	while true
+		n_iter += 1
+		n_files = 0
+		result_files = readdir("results")
+		if sum(occursin.(file_root, result_files)) == n
+			concatenate_data(file_root, size(H))
+			break
+		else
+			if n_iter > 10
+				break
+			end
+			sleep(60)
+		end
+	end
+    return
+end
 
 function LOO_cross_validation(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64)
     @printf("------------------------------\nStarting LOO-ALS with the following parameters:\n\tr = %d, λ = [%.4f, %.4f]\n", r, λ₁, λ₂)
