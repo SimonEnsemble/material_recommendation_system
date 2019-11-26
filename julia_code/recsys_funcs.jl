@@ -7,35 +7,46 @@ using Statistics
 using Random
 using JLD2
 using FileIO
+using StatsBase
 
-function k_fold_split(H::Array{Union{Float64, Missing}, 2}, k::Int, max_iter::Int=1000)
-    @assert k > 1 "Choose a `k` greater than 1, otherwise this function is pointless."
-    fold_matrix = fill(0, size(H))
+"""
+
+returns a fold assignment matrix, the same shape as `H`, where entry (i, j) is the fold to which the data point belongs. if a value is missing, we assign fold 0.
+"""
+function k_fold_split(H::Array{Union{Float64, Missing}, 2}, n_folds::Int, max_iter::Int=1000)
+    @assert n_folds > 1 "Choose a `n_folds` greater than 1, otherwise this function is pointless."
+    fold_assignment_matrix = fill(0, size(H))
     all_k_folds_not_represented_in_each_column = true
     n_iter = 0
     while all_k_folds_not_represented_in_each_column
         n_iter += 1
         all_k_folds_not_represented_in_each_column = false
-        for i_row = 1:size(H)[1]
-            # Grabs available indices (the ones that are not `missing`
-            avail_indices = findall(x->typeof(x) != Missing, H[i_row,:])
-            # As long as there are enough data points to distribute between `k` folds, we will equally distribute them
-            while length(avail_indices) >= k
-                for fold = 1:k
-                    j_col = rand(collect(1:length(avail_indices)))
-                    fold_matrix[i_row, avail_indices[j_col]] = fold
-                    filter!(e->e≠avail_indices[j_col], avail_indices)
+        for i_mof = 1:size(H)[1]
+            # grabs indices of gases in the current row (representing a MOF) that are not `missing`
+            gas_ids = findall(! ismissing, H[i_mof, :])
+            while length(gas_ids) >= n_folds
+                # assign a random data point to each fold
+                # this ensures that each fold has at least one data pt.
+                # we keep doing this until length(gas_ids) < n_folds to ensure even spread among the folds
+                for fold = 1:n_folds
+                    # randomly choose a gas_id to assign to this fold
+                    gas_id = sample(gas_ids)
+                    fold_assignment_matrix[i_mof, gas_id] = fold
+                    # remove this gas id from the list since it has been assigned
+                    filter!(g -> g ≠ gas_id, gas_ids)
                 end
             end
-            # If there are leftover data points (i.e. #data points left < `k`), we will randomly assign them into folds
-            for j_col in avail_indices
-                fold_matrix[i_row, j_col] = rand(collect(1:k))
+            # If there are leftover data points (i.e. #data points left < `n_folds`), we will randomly assign them into folds
+            for gas_id in gas_ids
+                fold_assignment_matrix[i_mof, gas_id] = rand(1:n_folds)
             end
         end
         # Now we have to make sure we have enough data points in the columns as well
-        for j_col = 1:size(H)[2]
-            unique_folds = unique(fold_matrix[:, j_col])
-            if length(unique_folds) <= k
+        for gas_id = 1:size(H)[2]
+            unique_folds = unique(fold_assignment_matrix[:, gas_id])
+            # if not all folds are represented in this column, then make the boolean true
+            #  so we can start over
+            if length(unique_folds) <= n_folds
                 all_k_folds_not_represented_in_each_column = true
                 break
             end
@@ -45,8 +56,15 @@ function k_fold_split(H::Array{Union{Float64, Missing}, 2}, k::Int, max_iter::In
             error("Maximum number of iterations reached. Try changing the `max_iter` argument.")
         end
     end
-    @printf("Number of iterations requried to split data into %d-folds: %d\n", k, n_iter)
-    return fold_matrix
+    # some sanity tests
+    @assert all(ismissing.(H) .== (fold_assignment_matrix .== 0)) # missing values in 0 fold
+    # each row has all n_folds
+    for i_mof = 1:size(H)[1]
+        @assert length(unique(fold_assignment_matrix[i_mof, :])) == n_folds + 1
+    end
+
+    @printf("Number of iterations requried to split data into %d-folds: %d\n", n_folds, n_iter)
+    return fold_assignment_matrix
 end
 
 function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}, error_threshold::Float64, convergence_threshold::Float64=1e-6, maxiter::Int=20000, verbose::Bool=true)
