@@ -8,6 +8,7 @@ using Random
 using JLD2
 using FileIO
 using StatsBase
+using ProgressMeter
 
 """
 
@@ -179,7 +180,9 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
         end
         # stop if we've reached the maximum number of ALS sweeps
         if nb_als_sweeps > max_als_sweeps
-            @printf("Maximum number of ALS sweeps (%d) reached.\n", max_als_sweeps)
+            if verbose
+                @printf("Maximum number of ALS sweeps (%d) reached.\n", max_als_sweeps)
+            end
             keep_doing_als_sweeps = false
         end
         
@@ -188,7 +191,9 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
         if abs(rel_loss_change) < relative_loss_threshold
             nb_als_sweeps_after_loss_stops_decreasing += 1
             if nb_als_sweeps_after_loss_stops_decreasing >= als_sweeps_after_loss_stops_decreasing
-                println("loss stopped decreasing")
+                if verbose 
+                    println("loss stopped decreasing")
+                end
                 keep_doing_als_sweeps = false
             end
         end
@@ -318,22 +323,30 @@ end
 function LOO_cross_validation(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64)
     @printf("------------------------------\nStarting LOO-ALS with the following parameters:\n\tr = %d, λ = [%.4f, %.4f]\n", r, λ₁, λ₂)
     non_missing_indices = findall(.!ismissing.(H))
-    n = length(non_missing_indices)
-    test_errors = Array{Float64, 1}(undef, n)
-    parity_prediction = zeros(size(H))
+    nb_nonmissing_data = length(non_missing_indices)
+    test_errors = Array{Float64, 1}(undef, nb_nonmissing_data)
+    H_prediction = zeros(size(H))
+
+    progress_bar = Progress(length(non_missing_indices), 1)
 
     for (i, index) in enumerate(non_missing_indices)
-        temp_H = copy(H)
-        temp_H[index] = missing
-        M, G, mu, gamma, train_error, train_loss, hbar = ALS(temp_H, r, [λ₁, λ₂], 1e-6, 1e-7, 100, false)
-        pred = M[:, index[1]]' * G[:, index[2]] + mu[1, index[1]] + gamma[1, index[2]] + hbar
-        parity_prediction[index] = pred
-        actual = H[index]
-        test_errors[i] = sqrt((actual - pred)^2)
+        next!(progress_bar)
+
+        mof_id = index[1]
+        gas_id = index[2]
+        # create H matrix with a missing value placed at this index
+        temp_H = deepcopy(H)
+        temp_H[mof_id, gas_id] = missing
+        # fit model
+        M, G, μ, γ, h̄, train_rmses, losses = ALS(temp_H, r, [λ₁, λ₂], 
+                                                 min_als_sweeps=50, max_als_sweeps=500, verbose=false)
+        # get predicted H for the left out point
+        H_prediction[mof_id, gas_id] = M[:, mof_id]' * G[:, gas_id] + μ[1, mof_id] + γ[1, gas_id] + h̄
+        test_errors[i] = abs(H[mof_id, gas_id] - H_prediction[mof_id, gas_id])
     end
     test_error = mean(test_errors)
     @printf("Test Error: %.4f\n", test_error)
-    return test_error, parity_prediction
+    return test_error, H_prediction
 end
 
 function mean_cross_validation(H::Array{Union{Float64, Missing}, 2}, fold_matrix::Array{Int, 2}, axis::AbstractString)
