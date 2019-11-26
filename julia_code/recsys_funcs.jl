@@ -21,9 +21,9 @@ function k_fold_split(H::Array{Union{Float64, Missing}, 2}, n_folds::Int, max_it
     while all_k_folds_not_represented_in_each_column
         n_iter += 1
         all_k_folds_not_represented_in_each_column = false
-        for i_mof = 1:size(H)[1]
+        for mof_id = 1:size(H)[1]
             # grabs indices of gases in the current row (representing a MOF) that are not `missing`
-            gas_ids = findall(! ismissing, H[i_mof, :])
+            gas_ids = findall(! ismissing, H[mof_id, :])
             while length(gas_ids) >= n_folds
                 # assign a random data point to each fold
                 # this ensures that each fold has at least one data pt.
@@ -31,14 +31,14 @@ function k_fold_split(H::Array{Union{Float64, Missing}, 2}, n_folds::Int, max_it
                 for fold = 1:n_folds
                     # randomly choose a gas_id to assign to this fold
                     gas_id = sample(gas_ids)
-                    fold_assignment_matrix[i_mof, gas_id] = fold
+                    fold_assignment_matrix[mof_id, gas_id] = fold
                     # remove this gas id from the list since it has been assigned
                     filter!(g -> g ≠ gas_id, gas_ids)
                 end
             end
             # If there are leftover data points (i.e. #data points left < `n_folds`), we will randomly assign them into folds
             for gas_id in gas_ids
-                fold_assignment_matrix[i_mof, gas_id] = rand(1:n_folds)
+                fold_assignment_matrix[mof_id, gas_id] = rand(1:n_folds)
             end
         end
         # Now we have to make sure we have enough data points in the columns as well
@@ -59,112 +59,144 @@ function k_fold_split(H::Array{Union{Float64, Missing}, 2}, n_folds::Int, max_it
     # some sanity tests
     @assert all(ismissing.(H) .== (fold_assignment_matrix .== 0)) # missing values in 0 fold
     # each row has all n_folds
-    for i_mof = 1:size(H)[1]
-        @assert length(unique(fold_assignment_matrix[i_mof, :])) == n_folds + 1
+    for mof_id = 1:size(H)[1]
+        @assert length(unique(fold_assignment_matrix[mof_id, :])) == n_folds + 1
     end
 
     @printf("Number of iterations requried to split data into %d-folds: %d\n", n_folds, n_iter)
     return fold_assignment_matrix
 end
 
-function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}, error_threshold::Float64, convergence_threshold::Float64=1e-6, maxiter::Int=20000, verbose::Bool=true)
+function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1};
+             relative_loss_threshold::Float64=1e-5, als_sweeps_after_loss_stops_decreasing::Int=15, 
+             max_als_sweeps::Int=20000, verbose::Bool=true)
     @assert length(λ) == 2 "There should be two λ values, one for each latent matrix."
-    n = 0
-    train_error_array = Array{Float64, 1}()
-    train_error = Inf
-    prev_error = 0.0
-    loss_arr = Array{Float64, 1}()
+    nb_als_sweeps = 0
+    train_rmses = Array{Float64, 1}()
+    train_rmse = Inf
+    prev_train_rmse = 0.0
+    losses = Array{Float64, 1}()
     loss = Inf
     prev_loss = 0.0
 
-    convergence_count = 0
+    nb_als_sweeps_after_loss_stops_decreasing = 0
     n_m = size(H)[1]
     n_g = size(H)[2]
-    H_missing_mask = .!ismissing.(H)
-
+    
+    # pre-allocate latent reps and biases
     M = rand(r, n_m) .- 0.5
     G = rand(r, n_g) .- 0.5
-    mu = rand(1, n_m) .- 0.5
-    gamma = rand(1, n_g) .- 0.5
-    hbar = mean(H[.!ismissing.(H)])
-    Im = n_g / n_m * λ[1] * Array{Float64, 2}(I, r, r)
-    Ig = λ[1] * Array{Float64, 2}(I, r, r)
-    bias_λ = [n_g / n_m * λ[2], λ[2]]
+    μ = rand(1, n_m) .- 0.5
+    γ = rand(1, n_g) .- 0.5
+    h̄ = mean(H[.!ismissing.(H)])
+    
+    # pre-allocate identity matrices for invoking regularization
+    Im = λ[1] * Array{Float64, 2}(I, r, r) / n_m
+    Ig = λ[1] * Array{Float64, 2}(I, r, r) / n_g
+    bias_λ = [λ[2] / n_m, λ[2] / n_g]
 
     if verbose
         @printf("M shape: (%d, %d)\tG shape: (%d, %d)\n", size(M)[1], size(M)[2], size(G)[1], size(G)[2])
     end
+    
+    # to facilitate the random choice of a latent vector for a MOF and for a gas
+    latent_vectors_to_update = vcat([(m, :mof) for m = 1:n_m], [(g, :gas) for g = 1:n_g])
+    # Boolean array of which entries in H are not missing
+    idx_H_nonmissing = .! ismissing.(H)
+    nb_nonmissing = sum(idx_H_nonmissing)
 
-    vector_to_pick = vcat([(m, "m") for m = 1:n_m], [(g, "g") for g = 1:n_g])
-    while loss > error_threshold
-        shuffle!(vector_to_pick)
-        for vector in vector_to_pick
-            if vector[2] == "m"
-                m = vector[1] 
-                gases_in_which_H_of_this_mof_is_measured = .!ismissing.(H[m,:])
-                biased_H = H[m, gases_in_which_H_of_this_mof_is_measured] .- (hbar .+ gamma[1, gases_in_which_H_of_this_mof_is_measured] .+ mu[1, m])
-                b = G[:, gases_in_which_H_of_this_mof_is_measured] * biased_H
-                A = G[:, gases_in_which_H_of_this_mof_is_measured] * G[:, gases_in_which_H_of_this_mof_is_measured]' + Im
-                M[:, m] = A\b
-                mu[1, m] = sum([H[m, g] - gamma[1, g] - hbar - M[:, m]' * G[:, g] for g = 1:n_g][gases_in_which_H_of_this_mof_is_measured]) / (sum(gases_in_which_H_of_this_mof_is_measured) + bias_λ[1])
-            else
-                g = vector[1]
-                mofs_in_which_H_of_this_gas_is_measured = .!ismissing.(H[:,g])
-                biased_H = H[mofs_in_which_H_of_this_gas_is_measured, g] .- (hbar .+ mu[1, mofs_in_which_H_of_this_gas_is_measured] .+ gamma[1, g])
-                b = M[:, mofs_in_which_H_of_this_gas_is_measured] * biased_H
-                A = M[:, mofs_in_which_H_of_this_gas_is_measured] * M[:, mofs_in_which_H_of_this_gas_is_measured]' + Ig
-                G[:, g] = A\b
-                gamma[1, g] = sum([H[m, g] - mu[1, m] - hbar - M[:, m]' * G[:, g] for m = 1:n_m][mofs_in_which_H_of_this_gas_is_measured]) / (sum(mofs_in_which_H_of_this_gas_is_measured) + bias_λ[2])
-            end
-        end
-
-        pred = (M' * G .+ hbar .+ mu' .+ gamma)[H_missing_mask][:]
-        actual = H[H_missing_mask][:]
-        prev_error = train_error
-        train_error = sqrt(sum((actual - pred).^2)/length(pred))
-        append!(train_error_array, train_error)
-        error_diff = abs(prev_error - train_error)
-        prev_loss = loss
-        loss = 0.5 * sum((actual-pred).^2) + 0.5 * λ[1] * (n_g / n_m * sum([norm(M[:,m])^2 for m = 1:n_m]) + sum([norm(G[:,g]) for g = 1:n_g])) + 0.5 * λ[2] * (n_g / n_m * norm(mu)^2 + norm(gamma)^2)
-        append!(loss_arr, loss)
-        loss_diff = prev_loss - loss
-        if n % 1000 == 0 && verbose
-            @printf("Train loss on iteration %d: %.3f\n---------------\n", n, loss)
-        end
-
-        if error_diff < convergence_threshold
-            convergence_count += 1
-            if convergence_count > 199
-                if verbose
-                    @printf("Training has converged after %d iterations. See `convergence` parameter for convergence procedure.\n", n)
-                    @printf("Train loss: %.3f\n", loss)
+    keep_doing_als_sweeps = true
+    while keep_doing_als_sweeps
+        # shuffle order for ALS
+        shuffle!(latent_vectors_to_update)
+        for latent_vector in latent_vectors_to_update
+            if latent_vector[2] == :mof
+                # index of MOF whose latent rep and bias we update
+                mof_id = latent_vector[1]
+                # get non-missing gas ids
+                gas_ids = findall(! ismissing, H[mof_id, :])
+                # update latent vector
+                biased_H = H[mof_id, gas_ids] .- (h̄ .+ γ[1, gas_ids] .+ μ[1, mof_id])
+                b = G[:, gas_ids] * biased_H
+                A = G[:, gas_ids] * G[:, gas_ids]' + Im
+                M[:, mof_id] = A \ b
+                # update bias
+                μ[1, mof_id] = 0.0
+                for gas_id in gas_ids
+                    μ[1, mof_id] += H[mof_id, gas_id] - γ[1, gas_id] - h̄ - M[:, mof_id]' * G[:, gas_id]
                 end
-                break
+                μ[1, mof_id] /= length(gas_ids) + bias_λ[1]
+            else
+                # index of gas whose latent rep and bias we update
+                gas_id = latent_vector[1]
+                # get non-missing mof ids
+                mof_ids = findall(! ismissing, H[:, gas_id])
+                # update latent vector
+                biased_H = H[mof_ids, gas_id] .- (h̄ .+ μ[1, mof_ids] .+ γ[1, gas_id])
+                b = M[:, mof_ids] * biased_H
+                A = M[:, mof_ids] * M[:, mof_ids]' + Ig
+                G[:, gas_id] = A \ b
+                # update bias
+                γ[1, gas_id] = 0.0
+                for mof_id in mof_ids
+                    γ[1, gas_id] += H[mof_id, gas_id] - μ[1, mof_id] - h̄ - M[:, mof_id]' * G[:, gas_id]
+                end
+                γ[1, gas_id] /= length(mof_ids) + bias_λ[2]
             end
-        else
-            convergence_count = 0
         end
-        n += 1
-        if n > maxiter
-            @printf("Maximum number of iterations (%d) reached.\n", maxiter)
-            break
+    
+        # compute sum of square errors on training data
+        h_predicted = M' * G .+ h̄ .+ μ' .+ γ
+        sse = sum((H[idx_H_nonmissing] - h_predicted[idx_H_nonmissing]) .^ 2)
+    
+        # update RMSE on training data
+        prev_train_rmse = train_rmse
+        train_rmse = sqrt(sse / nb_nonmissing)
+        push!(train_rmses, train_rmse)
+        rmse_diff = abs(prev_train_rmse - train_rmse)
+        
+        # update loss
+        prev_loss = loss
+        loss = 0.5 * sse # error term
+        loss += 0.5 * λ[1] * (sum([norm(M[:, m])^2 for m = 1:n_m]) / n_m + sum([norm(G[:,g]) for g = 1:n_g]) / n_g)
+        loss += 0.5 * λ[2] * (norm(μ)^2 / n_m + norm(γ)^2 / n_g)
+        push!(losses, loss)
+        loss_diff = prev_loss - loss
+
+        # print info every sweep
+        if nb_als_sweeps % 10 == 0 && verbose
+            println("ALS sweep ", nb_als_sweeps)
+            println("\ttraining loss = ", loss)
+            println("\ttraining RMSE = ", train_rmse)
         end
-        if sum(skipmissing(isnan.(M))) > 0 || sum(skipmissing(isnan.(G))) > 0
-            return M, G
-            error("NaN encountered in either latent representation")
+        
+        ###
+        ### stopping criteria
+        ###
+        # stop if we've reached the maximum number of ALS sweeps
+        nb_als_sweeps += 1
+        if nb_als_sweeps > max_als_sweeps
+            @printf("Maximum number of ALS sweeps (%d) reached.\n", max_als_sweeps)
+            keep_doing_als_sweeps = false
+        end
+        
+        # stop if the loss stopped decreasing for a certain number of iterations
+        rel_loss_change = (prev_loss - loss) / loss # greater than zero if loss decreased
+        if abs(rel_loss_change) < relative_loss_threshold
+            nb_als_sweeps_after_loss_stops_decreasing += 1
+            if nb_als_sweeps_after_loss_stops_decreasing >= als_sweeps_after_loss_stops_decreasing
+                println("loss stopped decreasing")
+                keep_doing_als_sweeps = false
+            end
         end
     end
 
-    if verbose
-        fig, ax = plt.subplots(figsize=(8,6))
-        ax.plot(collect(1:length(loss_arr)), loss_arr, color="red")
-        ax.set_xlabel("Iterations")
-        ax.set_ylabel("Train Loss")
-        plt.grid(true)
-        plt.tight_layout()
-        plt.savefig("asdf2.png", format="png", dpi=300)
+    if any(isnan.(M)) || any(isnan.(G)) || any(ismissing.(M)) || any(ismissing.(G))
+        error("NaN or missing encountered in either latent representation")
+        return M, G
     end
-    return M, G, mu, gamma, train_error_array[end], loss_arr[end], hbar
+
+    return M, G, μ, γ, h̄, train_rmses, losses
 end
 
 function cross_validation(H::Array{Union{Float64, Missing}, 2}, fold_matrix::Array{Int, 2}, r::Int, λ₁::Float64, λ₂::Float64)
