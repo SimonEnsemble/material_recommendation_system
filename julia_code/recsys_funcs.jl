@@ -69,7 +69,7 @@ end
 
 function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1};
              relative_loss_threshold::Float64=1e-5, als_sweeps_after_loss_stops_decreasing::Int=15, 
-             max_als_sweeps::Int=20000, verbose::Bool=true)
+             max_als_sweeps::Int=20000, min_als_sweeps::Int=25, verbose::Bool=true)
     @assert length(λ) == 2 "There should be two λ values, one for each latent matrix."
     nb_als_sweeps = 0
     train_rmses = Array{Float64, 1}()
@@ -107,6 +107,7 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
 
     keep_doing_als_sweeps = true
     while keep_doing_als_sweeps
+        nb_als_sweeps += 1
         # shuffle order for ALS
         shuffle!(latent_vectors_to_update)
         for latent_vector in latent_vectors_to_update
@@ -173,8 +174,10 @@ function ALS(H::Array{Union{Float64, Missing}, 2}, r::Int, λ::Array{Float64, 1}
         ###
         ### stopping criteria
         ###
+        if nb_als_sweeps < min_als_sweeps
+            continue
+        end
         # stop if we've reached the maximum number of ALS sweeps
-        nb_als_sweeps += 1
         if nb_als_sweeps > max_als_sweeps
             @printf("Maximum number of ALS sweeps (%d) reached.\n", max_als_sweeps)
             keep_doing_als_sweeps = false
