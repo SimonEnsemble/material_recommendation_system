@@ -320,17 +320,21 @@ function LOO_for_cluster(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Fl
     return
 end
 
-function LOO_cross_validation(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64)
+function LOO_cross_validation(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64, jld_output_filename::Union{Nothing, String}=nothing;
+    min_als_sweeps::Int=30, max_als_sweeps::Int=500, show_progress::Bool=false)
     @printf("------------------------------\nStarting LOO-ALS with the following parameters:\n\tr = %d, λ = [%.4f, %.4f]\n", r, λ₁, λ₂)
     non_missing_indices = findall(.!ismissing.(H))
     nb_nonmissing_data = length(non_missing_indices)
-    test_errors = Array{Float64, 1}(undef, nb_nonmissing_data)
-    H_prediction = zeros(size(H))
+    test_rmse = 0.0
+    H_LOO_prediction = zeros(size(H))
+    fill!(H_LOO_prediction, NaN) # fill with NaN for safety
 
     progress_bar = Progress(length(non_missing_indices), 1)
 
     for (i, index) in enumerate(non_missing_indices)
-        next!(progress_bar)
+        if show_progress
+            next!(progress_bar)
+        end
 
         mof_id = index[1]
         gas_id = index[2]
@@ -339,14 +343,22 @@ function LOO_cross_validation(H::Array{Union{Float64, Missing}, 2}, r::Int, λ�
         temp_H[mof_id, gas_id] = missing
         # fit model
         M, G, μ, γ, h̄, train_rmses, losses = ALS(temp_H, r, [λ₁, λ₂], 
-                                                 min_als_sweeps=50, max_als_sweeps=500, verbose=false)
+                                                 min_als_sweeps=min_als_sweeps, max_als_sweeps=max_als_sweeps, verbose=false)
         # get predicted H for the left out point
-        H_prediction[mof_id, gas_id] = M[:, mof_id]' * G[:, gas_id] + μ[1, mof_id] + γ[1, gas_id] + h̄
-        test_errors[i] = abs(H[mof_id, gas_id] - H_prediction[mof_id, gas_id])
+        H_LOO_prediction[mof_id, gas_id] = M[:, mof_id]' * G[:, gas_id] + μ[1, mof_id] + γ[1, gas_id] + h̄
+        test_rmse += (H[mof_id, gas_id] - H_LOO_prediction[mof_id, gas_id]) ^ 2
     end
-    test_error = mean(test_errors)
-    @printf("Test Error: %.4f\n", test_error)
-    return test_error, H_prediction
+    test_rmse /= length(non_missing_indices)
+    test_rmse = sqrt(test_rmse)
+    @printf("Test RMSE: %.4f\n", test_rmse)
+    # write data to file if applicable
+    if ! isnothing(jld_output_filename)
+        if ! occursin("jld2", jld_output_filename)
+            jld_output_filename *= ".jld2"
+        end
+        save(jld_output_filename, "test_rmse", test_rmse, "H_LOO_prediction", H_LOO_prediction)
+    end
+    return test_rmse, H_LOO_prediction
 end
 
 function mean_cross_validation(H::Array{Union{Float64, Missing}, 2}, fold_matrix::Array{Int, 2}, axis::AbstractString)
