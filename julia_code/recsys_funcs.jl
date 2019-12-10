@@ -226,12 +226,12 @@ function cross_validation(H::Array{Union{Float64, Missing}, 2}, fold_matrix::Arr
 end
 
 
-function write_submit_file(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64, idx1::Int, idx2::Int)
+function write_submit_file(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Float64, λ₂::Float64)
     jobscriptdir = "jobz"
     if ! isdir(jobscriptdir)
         mkdir(jobscriptdir)
     end
-	filename = @sprintf("LOO_%d_%.3f_%.3f_%d_%d", r, λ₁, λ₂, idx1, idx2)
+	filename = loo_filename(r, λ₁, λ₂)
 #	@printf("Running the following job: %s\n", filename)
 
     submit_file = open(filename * ".sh", "w")
@@ -252,13 +252,14 @@ function write_submit_file(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::
     #\$ -e jobz/%s.e
     #\$ -o jobz/%s.o
 
-    /nfs/stak/users/sturlusa/julia-1.1.0/bin/julia run_loo.jl %d %f %f %d %d
+    /nfs/stak/users/sturlusa/julia-1.1.0/bin/julia run_loo.jl %d %f %f
     """,
-    filename, filename, filename, r, λ₁, λ₂, idx1, idx2)
+    filename, filename, filename, r, λ₁, λ₂)
     close(submit_file)
     return filename * ".sh"
 end
 
+#TODO: Fix this function
 function concatenate_data(file_root::AbstractString, H_shape::Tuple{Int, Int})
 	correct_files = [file for file in readdir("results") if occursin(file_root, file)]
 	n = length(correct_files)
@@ -291,7 +292,7 @@ function LOO_for_cluster(H::Array{Union{Float64, Missing}, 2}, r::Int, λ₁::Fl
 	n = length(non_missing_indices)
 
     for (i, index) in enumerate(non_missing_indices)
-		filename = @sprintf("LOO_%d_%.3f_%.3f_%d_%d", r, λ₁, λ₂, index[1], index[2])
+		filename = loo_filename(r, λ₁, λ₂)
 		if any(occursin.(filename, readdir("results")))	|| any(occursin.(@sprintf("LOO_%d_%.3f_%.3f.jld2", r, λ₁, λ₂), readdir()))
 			continue
 		end
@@ -399,3 +400,4 @@ function missing_mean(H::Array{Union{Missing, Float64},2}, axis::Int)
     return means
 end
 
+loo_filename(r::Int, λ₁::Float64, λ₂::Float64) = @sprintf("LOO_%d_%.3e_%.3e", r, λ₁, λ₂)
