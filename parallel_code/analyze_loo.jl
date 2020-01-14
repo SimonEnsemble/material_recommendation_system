@@ -21,8 +21,8 @@ log_H = log10.(H)
 jld_files = [file for file in readdir("results") if split(file, ".")[end] == "jld2"]
 rs = unique([z[2] for z in split.(jld_files, "_")])
 
-accepted_lambda_ls = 10 .^ range(2, 4, length=20)
-accepted_lambda_bs = 10 .^ range(0, 2, length=20)
+accepted_lambda_ls = 10 .^ range(2, 3, length=20)
+accepted_lambda_bs = 10 .^ range(0.5, 2, length=20)
 
 unique_lambda_ls = USE_ACCEPTED_LAMBDAS ? Dict(r => accepted_lambda_ls for r in rs) : Dict(r => sort!(unique([parse(Float64, z[3]) for z in split.(jld_files, "_") if z[2] == r])) for r in rs)
 unique_lambda_bs = USE_ACCEPTED_LAMBDAS ? Dict(r => accepted_lambda_bs for r in rs) : Dict(r => sort!(unique([parse(Float64, split(z[4], ".jld2")[1]) for z in split.(jld_files, "_") if z[2] == r])) for r in rs)
@@ -56,34 +56,9 @@ for jld_file in jld_files
     end
 end
 
-for r in rs
-    fig, ax = plt.subplots(figsize=(14,12))
-    for x in 1:size(loo_rmses[r])[2]
-        ax.plot([x, x], [0, size(loo_rmses[r])[1]], linewidth=1.25, color="k")
-    end
-    for y in 1:size(loo_rmses[r])[1]
-        ax.plot([0, size(loo_rmses[r])[2]], [y, y], linewidth=1.25, color="k")
-    end
-
-    img = ax.pcolormesh(loo_rmses[r], cmap="viridis", vmin=0.756, vmax=0.8)
-    extend_string = any(loo_rmses[r][:] .> 0.9) ? "max" : "neither"
-    cbar = plt.colorbar(img, extend=extend_string)
-    cbar.set_label("Test RMSE", fontsize=14, rotation=270, labelpad=25)
-    ax.set_xlabel(L"$\lambda_b$", fontsize=14)
-    ax.set_ylabel(L"$\lambda_l$", fontsize=14)
-    ax.set_xticks(1:length(unique_lambda_bs[r]))
-    ax.set_xticklabels([@sprintf("%.2e", x) for x in unique_lambda_bs[r]], rotation=90)
-    ax.set_yticklabels([@sprintf("%.2e", x) for x in unique_lambda_ls[r]])
-    ax.set_title(@sprintf("r = %d", parse(Int, r)), fontsize=16)
-    ax.set_yticks(1:length(unique_lambda_ls[r]))
-
-
-    plt.tight_layout()
-    plt.savefig("loss_heatmap_r" * r * ".png", format="png", dpi=300)
-    plt.close()
-end
-
+R² = Dict(r => 0.0 for r in rs)
 for _r in rs
+    global R²
     _, r, λl, λb = split(split(lowest_err_filename[_r], ".jld2")[1], "_")
     @printf("Best model is r = %d, lambda_l = %.3f, lambda_b = %.3f\n", 
                 parse(Int, r), parse(Float64, λl), parse(Float64, λb))
@@ -93,6 +68,40 @@ for _r in rs
 
     non_missing_indices = .!ismissing.(actual)
     actual_mean = mean(actual[non_missing_indices])
-    R² = 1 - (sum([(actual[i] - prediction[i])^2 for i = collect(1:length(actual))[non_missing_indices]]) / sum([(actual[i] - actual_mean)^2 for i = collect(1:length(actual))[non_missing_indices]]))
-    @printf("R2 = %.3f\n", R²)
+    R²[_r] = 1 - (sum([(actual[i] - prediction[i])^2 for i = collect(1:length(actual))[non_missing_indices]]) / sum([(actual[i] - actual_mean)^2 for i = collect(1:length(actual))[non_missing_indices]]))
+    @printf("R2 = %.3f\n", R²[_r])
 end
+
+for r in rs
+    fig, ax = plt.subplots(figsize=(14,12))
+    for x in 1:size(loo_rmses[r])[2]
+        ax.plot([x, x], [0, size(loo_rmses[r])[1]], linewidth=1.25, color="k")
+    end
+    for y in 1:size(loo_rmses[r])[1]
+        ax.plot([0, size(loo_rmses[r])[2]], [y, y], linewidth=1.25, color="k")
+    end
+
+    min_index = argmin(loo_rmses[r])
+    ax.plot([min_index[2]-1, min_index[2]-1], [min_index[1]-1, min_index[1]], linewidth=2, color="#f58231")
+    ax.plot([min_index[2], min_index[2]], [min_index[1]-1, min_index[1]], linewidth=2, color="#f58231")
+    ax.plot([min_index[2]-1, min_index[2]], [min_index[1]-1, min_index[1]-1], linewidth=2, color="#f58231")
+    ax.plot([min_index[2]-1, min_index[2]], [min_index[1], min_index[1]], linewidth=2, color="#f58231")
+
+    img = ax.pcolormesh(loo_rmses[r], cmap="viridis", vmin=0.756, vmax=0.8)
+    extend_string = any(loo_rmses[r][:] .> 0.9) ? "max" : "neither"
+    cbar = plt.colorbar(img, extend=extend_string)
+    cbar.set_label("Test RMSE", fontsize=14, rotation=270, labelpad=25)
+    ax.set_xlabel(L"$\lambda_b$", fontsize=14)
+    ax.set_ylabel(L"$\lambda_l$", fontsize=14)
+    ax.set_xticks(collect(1:length(unique_lambda_bs[r])) .- 0.5)
+    ax.set_yticks(collect(1:length(unique_lambda_ls[r])) .- 0.5)
+    ax.set_xticklabels([@sprintf("%.2e", x) for x in unique_lambda_bs[r]], rotation=90)
+    ax.set_yticklabels([@sprintf("%.2e", x) for x in unique_lambda_ls[r]])
+    ax.set_title(@sprintf("r = %d, R2 = %.3f", parse(Int, r), R²[r]), fontsize=16)
+
+
+    plt.tight_layout()
+    plt.savefig("loss_heatmap_r" * r * ".png", format="png", dpi=300)
+    plt.close()
+end
+
