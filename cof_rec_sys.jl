@@ -6,9 +6,10 @@ using InteractiveUtils
 
 # ╔═╡ 92083d94-5b82-11eb-2274-ed62139bbf2d
 begin
-	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP
+	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall
 	using ScikitLearn.CrossValidation: train_test_split
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
+	adjustText = pyimport("adjustText")
 end
 
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
@@ -75,6 +76,12 @@ begin
 	const n_p = length(properties)
 	# material property matrix
 	const A_complete_unnormalized = convert(Matrix, df[:, properties])
+	
+	# normalize columns
+	A_n = deepcopy(A_complete_unnormalized)
+	for i = 1:n_p
+		A_n[:, i] = (A_n[:, i] .- mean(A_n[:, i])) ./ std(A_n[:, i])
+	end
 end
 
 # ╔═╡ c4e8d0b0-5b83-11eb-1cb3-8125c5d3c4ae
@@ -550,78 +557,195 @@ begin
 	@assert size(p_vecs) == (2, n_p)
 end
 
-# ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
-begin
-	figure()
-	scatter(m_vecs[1, :], m_vecs[2, :])
+# ╔═╡ 8024beae-5f88-11eb-3e97-b7afbbbc6f5c
+function viz_prop_latent_space()
+	figure(figsize=(10, 10))
+	scatter(p_vecs[1, :], p_vecs[2, :], edgecolor="k")
 	xlabel("UMAP dimension 1")
 	ylabel("UMAP dimension 2")
+	texts = []
+	for p = 1:n_p
+		push!(texts, 
+			annotate(prop_to_label[properties[p]], 
+				(p_vecs[1, p], p_vecs[2, p]), fontsize=10, ha="center")
+			)
+	end
+	adjustText.adjust_text(texts, force_text=(0.01, 0.01))
+	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
 	gcf()
 end
+
+# ╔═╡ ab3a5568-5f88-11eb-373a-2f79bfce3cff
+viz_prop_latent_space()
+
+# ╔═╡ 5e72bb6e-5f89-11eb-33c1-472327869ed1
+properties
+
+# ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
+function color_latent_material_space(p::Int)
+	figure()
+	scatter(m_vecs[1, :], m_vecs[2, :], c=A_n[:, p], s=25, 
+		vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+	xlabel("UMAP dimension 1")
+	ylabel("UMAP dimension 2")
+	colorbar(label=prop_to_label[properties[p]], extend="both")
+	gca().set_aspect("equal", "box")
+	tight_layout()
+	gcf()
+end
+
+# ╔═╡ b0619008-5f86-11eb-11b6-c7a3c4db9fd3
+color_latent_material_space(15)
+
+# ╔═╡ 86b00b60-5f89-11eb-071f-bb364af09c2a
+color_latent_material_space(12)
 
 # ╔═╡ 0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 md"# loop over θs"
 
 # ╔═╡ 5bbe8438-5f41-11eb-3d16-716bcb25400b
 begin
-	function run_θ_study(θ::Float64, nb_sims::Int)
-		# run sims, keep track of true vs pred and (k, λ)
-		a = Float64[] # true adsorption
-		â = Float64[] # pred adsorption
-		k = Int[]     # rank
-		λ = Float64[] # reg param
-		for s = 1:nb_sims
-			# run sim
-			test_result, opt_valid_run = run_simulation(θ)
-			a = vcat(a, test_result.a)
-			â = vcat(â, test_result.â)
-			push!(k, opt_valid_run.hyper_param.k)
-			push!(λ, opt_valid_run.hyper_param.λ)
-		end
-		return a, â, k, λ
+	struct SparseResult
+		ρ::Float64
+		ρb::Float64
+		ρp::Array{Float64, 1}
+		ρpb::Array{Float64, 1}
+		k::Int
+		λ::Float64
 	end
-
-	a, â, k, λ = run_θ_study(0.4, 1)
+	
+	function run_θ_study(θ::Float64, nb_sims::Int)
+		results = SparseResult[]
+		for s = 1:nb_sims
+			res = run_simulation(θ)
+			push!(results, 
+				SparseResult(corspearman(res.a, res.â),
+				             corspearman(res.a, res.âb),
+							 res.ρp,
+							 res.ρpb,
+					         res.hp.k,
+							 res.hp.λ
+						     )
+				)
+		end
+		return results
+	end
+	
+	θs = [0.4, 0.5, 0.6]
+	θresults = [run_θ_study(θ, 3) for θ in θs]
 end
+
+# ╔═╡ c7aa89b0-5f93-11eb-0503-5565bba9cb86
+function viz_ρp_vsθ()
+	fig, axs = plt.subplots(ncols=n_p, figsize=(25, 4.0), sharex=true)
+		# gridspec_kw=Dict("hspace" => 0.25), sharex=true)
+	for (p, ax) in enumerate(axs)
+		if p == 1
+			ax.set_ylabel("Spearman's rank\ncorrelation coefficient\n" * L"$\rho$")
+			ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+		else
+			ax.spines["left"].set_visible(false)
+			ax.yaxis.set_visible(false)
+		end
+		if p == floor(Int, n_p/2)
+			ax.set_xlabel(L"target fraction observed entries, $\theta$")
+		end
+		ax.spines["right"].set_visible(false)
+		ax.spines["bottom"].set_position("zero")
+		ax.spines["top"].set_visible(false)
+		ax.set_ylim([0.0, 1.0])
+		
+		# one per θ
+		ρ_avg = [mean([res.ρp[p] for res in θresults[i]]) for i = 1:length(θs)]
+		ρ_std = [std([res.ρp[p] for res in θresults[i]]) for i = 1:length(θs)]
+		ρb_avg = [mean([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
+		ρb_std = [std([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
+		
+		ax.plot(θs, ρ_avg, marker="o")
+		ax.fill_between(θs, ρ_avg .- ρ_std, ρ_avg .+ ρ_std, alpha=0.3)
+		
+		ax.plot(θs, ρb_avg, marker="o", linestyle="--")
+		ax.fill_between(θs, ρb_avg .- ρb_std, ρb_avg .+ ρb_std, alpha=0.3)
+		
+		ax.set_title(prop_to_label[properties[p]], fontsize=14, rotation=90)
+	end
+	for ax in axs
+		ax.set_xticks([0.0, 0.5, 1.0])
+	end
+	tight_layout()
+	savefig("rho_vs_theta.pdf", format="pdf")
+    
+	gcf()
+end
+
+# ╔═╡ 56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
+viz_ρp_vsθ()
+
+# ╔═╡ 0830c1de-5f9e-11eb-132a-77b3084102b2
+begin
+	dfθ = DataFrame(θ=Float64[], k=Int[], λ=Float64[])
+	for i = 1:length(θs)
+		for r in θresults[i]
+			push!(dfθ, [θs[i], r.k, r.λ])
+		end
+	end
+	dfθ
+end
+
+# ╔═╡ 85e6f240-5f9b-11eb-36a0-91dfe6d1fd7b
+function viz_kλ_vsθ()
+	# dist'n of hyper-params
+	fig, axs = subplots(ncols=length(θs), nrows=2, figsize=(10, 2.0))
+	for (i, θ) in enumerate(length(θs))
+		res = θresults[i]
+		
+		for kᵢ in ks
+			axs[1, i].plot([kᵢ, kᵢ], [0, sum([r.k for r in res] .== kᵢ)], color="C0", lw=3)
+			# axs[1, i].scatter(kᵢ, sum(k .== kᵢ), color="C0")
+		end
+		axs[1, i].set_xlabel(L"dimensionality of latent space, $k$")
+		axs[1, i].set_ylabel("# simulations")
+		axs[1, i].set_xticks(ks)
+
+		for λᵢ in λs
+			axs[2].plot([λᵢ, λᵢ], [0, sum([r.λ for r in res] .== λᵢ)], color="C1", lw=3)
+			# axs[2].scatter(λᵢ, sum(λ .== λᵢ), color="C1")
+		end
+		axs[2].set_xlabel(L"regularization parameter, $\lambda$")
+		axs[2].set_ylabel("# simulations")
+		axs[2].set_xticklabels(ks)
+		axs[2].set_xscale("log")
+	end
+	# ax.set_yscale("log")
+	# ax.set_ylabel(L"$\lambda$")
+	# ax.set_yticks(1:length(λs))
+	tight_layout()
+	suptitle("hyper-parameter distribution")
+    
+	gcf()
+end
+
+# ╔═╡ e2c4ce34-5f9c-11eb-3354-6d75405edbbc
+viz_kλ_vsθ()
 
 # ╔═╡ 15c50a00-5f42-11eb-2044-91cd5ccf6d67
 md"
 stack vectors together to get the true distribution over different #'s of simulations.
 "
 
-# ╔═╡ b329a5f4-5f46-11eb-2e06-e9e991991815
+# ╔═╡ b8687c80-5f95-11eb-3716-130c350fb50b
+
+
+# ╔═╡ f46def3c-5f9d-11eb-1149-7d7e8c86ff05
 begin
-	# dist'n of hyper-params
-	fig, axs = subplots(2, 1)
-	for kᵢ in ks
-		axs[1].plot([kᵢ, kᵢ], [0, sum(k .== kᵢ)], color="C0", lw=3)
-		axs[1].scatter(kᵢ, sum(k .== kᵢ), color="C0")
-	end
-	axs[1].set_xlabel(L"dimensionality of latent space, $k$")
-	axs[1].set_ylabel("# simulations")
-	axs[1].set_xticks(ks)
-	
-	for λᵢ in λs
-		axs[2].plot([λᵢ, λᵢ], [0, sum(λ .== λᵢ)], color="C1", lw=3)
-		axs[2].scatter(λᵢ, sum(λ .== λᵢ), color="C1")
-	end
-	axs[2].set_xlabel(L"regularization parameter, $\lambda$")
-	axs[2].set_ylabel("# simulations")
-	axs[2].set_xticklabels(ks)
-	axs[2].set_xscale("log")
-	
-	# ax.set_yscale("log")
-	# ax.set_ylabel(L"$\lambda$")
-	# ax.set_yticks(1:length(λs))
-	tight_layout()
-	suptitle("hyper-parameter distribution")
-	gcf()
+	import Gadfly
+	Gadfly.plot(dfθ, x="θ", y="k", Gadfly.Geom.beeswarm)
 end
 
-# ╔═╡ f32146b2-5f5f-11eb-019a-0b5838c2fd40
-
+# ╔═╡ 56850a2e-5f9f-11eb-246a-191b67f756d8
+	Gadfly.plot(dfθ, x="θ", y="λ", Gadfly.Geom.beeswarm)
 
 # ╔═╡ Cell order:
 # ╠═92083d94-5b82-11eb-2274-ed62139bbf2d
@@ -662,9 +786,20 @@ end
 # ╟─b0560c02-5f80-11eb-338b-c9cc48b741af
 # ╠═ba8ce81e-5f80-11eb-3e39-f942cb6d0d1f
 # ╠═c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
+# ╠═8024beae-5f88-11eb-3e97-b7afbbbc6f5c
+# ╠═ab3a5568-5f88-11eb-373a-2f79bfce3cff
+# ╠═5e72bb6e-5f89-11eb-33c1-472327869ed1
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
+# ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
+# ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
+# ╠═c7aa89b0-5f93-11eb-0503-5565bba9cb86
+# ╠═56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
+# ╠═0830c1de-5f9e-11eb-132a-77b3084102b2
+# ╠═85e6f240-5f9b-11eb-36a0-91dfe6d1fd7b
+# ╠═e2c4ce34-5f9c-11eb-3354-6d75405edbbc
 # ╟─15c50a00-5f42-11eb-2044-91cd5ccf6d67
-# ╠═b329a5f4-5f46-11eb-2e06-e9e991991815
-# ╠═f32146b2-5f5f-11eb-019a-0b5838c2fd40
+# ╠═b8687c80-5f95-11eb-3716-130c350fb50b
+# ╠═f46def3c-5f9d-11eb-1149-7d7e8c86ff05
+# ╠═56850a2e-5f9f-11eb-246a-191b67f756d8
