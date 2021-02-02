@@ -19,6 +19,7 @@ md"# read in data"
 # ╔═╡ b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 begin
 	df = CSV.read("aiida_ads_data_oct20.csv", DataFrame)
+	df[:, :cof] = map(c -> split(c, ".cif")[1], df[:, :cof])
 	
 	# log-10 transform the henry coefficients.
 	for henry_col in Symbol.(["h2o_henry", "h2s_henry", "xe_henry", "kr_henry"])
@@ -27,6 +28,14 @@ begin
 	    # log-10 transform
 	    df[!, henry_col] = log10.(df[:, henry_col])
 	end
+	
+	# cof common names
+	#  https://github.com/danieleongari/CURATED-COFs/blob/master/cof-frameworks.csv
+	df_names = CSV.read("cof-frameworks.csv", DataFrame)
+	rename!(df_names, Symbol("CURATED-COFs ID") => :cof)
+	df_names = df_names[:, [:cof, :Name]]
+	
+	df = join(df, df_names, on=:cof, kind=:left)
 	
 	first(df, 10)
 end
@@ -90,7 +99,7 @@ begin
 						 "ch4_5.8bar"     => L"CH$_4$" * "\n298 K\n5.8 bar"
 						)
 
-	const materials = map(x -> split(x, ".cif")[1], df[:, :cof])
+	const materials = df[:, :Name]# map(x -> split(x, ".cif")[1], df[:, :cof])
 	const n_m = length(materials)
 	const n_p = length(properties)
 	# material property matrix
