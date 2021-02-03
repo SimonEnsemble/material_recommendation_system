@@ -627,7 +627,35 @@ color_latent_material_space(15)
 color_latent_material_space(12)
 
 # ╔═╡ 81b4b31e-65dc-11eb-0045-a5b3fc899efe
-[color_latent_material_space(p) for p = 1:n_p] #viz them all.
+
+
+# ╔═╡ 244ce106-65e4-11eb-080b-f52f27e435fc
+function color_latent_material_space_all()
+	fig, axs = subplots(4, 4, sharex=true, sharey=true)
+	p = 0
+	for i = 1:4
+		for j = 1:4
+			p += 1
+			da_plot = axs[i, j].scatter(m_vecs[1, :], m_vecs[2, :], c=A_n[:, p], s=25, 
+							  vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+			# xlabel("UMAP dimension 1")
+			# ylabel("UMAP dimension 2")
+			axs[i, j].set_title(prop_to_label2[property[p]])
+			axs[i, j].set_aspect("equal", "box")
+			if i == 4 and j == 4
+				fig.subplots_adjust(right=0.8)
+				cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+				fig.colorbar(da_plot, cax=cbar_ax, extend="both", 
+			end
+		end
+	end
+	tight_layout()
+	savefig("latent_mat_space.pdf", format="pdf")
+	gcf()
+end
+
+# ╔═╡ 2e523504-65e4-11eb-1cbc-fd2cb39afed6
+color_latent_material_space_all()
 
 # ╔═╡ 55ee1330-6508-11eb-37d1-1973f7e077ed
 md"todo: color by void fraction etc."
@@ -780,7 +808,9 @@ end
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
-# ╠═81b4b31e-65dc-11eb-0045-a5b3fc899efe
+# ╟─81b4b31e-65dc-11eb-0045-a5b3fc899efe
+# ╠═244ce106-65e4-11eb-080b-f52f27e435fc
+# ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b

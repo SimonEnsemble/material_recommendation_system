@@ -51,7 +51,7 @@ function just_matrix()
 		end
 	end
 		
-	movies = false
+	movies = true
 
 	figure(figsize=(2.65, 4))
 	ax = gca()
