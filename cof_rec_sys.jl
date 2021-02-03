@@ -6,11 +6,13 @@ using InteractiveUtils
 
 # ╔═╡ 92083d94-5b82-11eb-2274-ed62139bbf2d
 begin
-	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall, ProgressMeter
+	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall, ProgressMeter, Random
 	using ScikitLearn.CrossValidation: train_test_split
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
 	# PyPlot.matplotlib.style.use("https://raw.githubusercontent.com/garrettj403/SciencePlots/master/styles/science.mplstyle")
 	adjustText = pyimport("adjustText")
+	
+	Random.seed!(97330)
 end
 
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
@@ -196,6 +198,12 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2})
 	gcf()
 end
 
+# ╔═╡ ba41bf4a-65de-11eb-3795-8d7fb25e98ca
+
+
+# ╔═╡ bdecc3ba-65de-11eb-0804-a1623bb6137e
+
+
 # ╔═╡ 6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 md"# fit low rank model"
 
@@ -333,9 +341,12 @@ end
 md"# hyperparam grid sweep"
 
 # ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
-hpgrid = HPGrid(collect(1:5),                       # ranks
-				10.0 .^ range(-2.0, 2.0, length=5) # reg params
+hpgrid = HPGrid(collect(1:15),                       # ranks
+				10.0 .^ range(-2.0, 2.0, length=20)  # reg params
 				)
+
+# ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
+
 
 # ╔═╡ 9cf75472-5ba0-11eb-371a-5bc338946b61
 # hyperparam sweep
@@ -464,8 +475,11 @@ end
 # ╔═╡ 5d38b414-5f41-11eb-14b9-73a9007fc263
 md"# $\theta=0.4$ example"
 
+# ╔═╡ bdb51f2e-65d8-11eb-1063-614c91a95e6e
+
+
 # ╔═╡ 4f81a520-5f6d-11eb-1960-9918ca4f25e9
-res = run_simulation(0.4, show_progress=true)
+@time res = run_simulation(0.4, show_progress=true)
 
 # ╔═╡ 68fe93ae-5f6e-11eb-012a-81378cd15b41
 viz_matrix(res.A)
@@ -515,6 +529,8 @@ begin
 	# 	)
 	legend()
 	ylim([0.0, 1.0])
+	tight_layout()
+	savefig("rho_per_gas.pdf", format="pdf")
 	gcf()
 end
 
@@ -599,6 +615,7 @@ function color_latent_material_space(p::Int)
 	ylabel("UMAP dimension 2")
 	colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
+	savefig("latent_mat_space_$p.pdf", format="pdf")
 	tight_layout()
 	gcf()
 end
@@ -608,6 +625,9 @@ color_latent_material_space(15)
 
 # ╔═╡ 86b00b60-5f89-11eb-071f-bb364af09c2a
 color_latent_material_space(12)
+
+# ╔═╡ 81b4b31e-65dc-11eb-0045-a5b3fc899efe
+[color_latent_material_space(p) for p = 1:n_p] #viz them all.
 
 # ╔═╡ 55ee1330-6508-11eb-37d1-1973f7e077ed
 md"todo: color by void fraction etc."
@@ -643,8 +663,8 @@ begin
 		return results
 	end
 	
-	nb_sims = 3
-	θs = 0.1:0.2:0.6
+	nb_sims = 5
+	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
 	for (i, θ) in enumerate(θs)
@@ -652,9 +672,6 @@ begin
 		update!(pm, i)
 	end
 end
-
-# ╔═╡ 8281aa22-65a5-11eb-3aca-15502d85d788
-run_θ_study(.2, 2)
 
 # ╔═╡ c7aa89b0-5f93-11eb-0503-5565bba9cb86
 function viz_ρp_vsθ()
@@ -728,6 +745,8 @@ end
 # ╠═2366b3cc-5b8f-11eb-07e4-61cbc97d5480
 # ╟─6236b296-5f60-11eb-3aa7-5188433b3906
 # ╠═5ae47630-5f64-11eb-39f8-654f8d277674
+# ╟─ba41bf4a-65de-11eb-3795-8d7fb25e98ca
+# ╟─bdecc3ba-65de-11eb-0804-a1623bb6137e
 # ╟─6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 # ╠═8a3c55ae-5ba4-11eb-3354-f9a8feaa7e91
 # ╠═b518d378-65ca-11eb-3bda-adcd26ccaa13
@@ -741,11 +760,13 @@ end
 # ╠═36da7c1e-5bb1-11eb-2bc9-438dabcf9cc5
 # ╟─efc74f24-5ba0-11eb-2c44-6dac87ec534a
 # ╠═a269ab26-5ba4-11eb-1001-6703f57f495c
+# ╟─2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
 # ╠═9cf75472-5ba0-11eb-371a-5bc338946b61
 # ╟─2009751a-5bae-11eb-158f-a3d9cb98fe24
 # ╠═09b74408-5baa-11eb-3735-e9333756f565
 # ╠═b285e2fe-5ba7-11eb-2e12-83e72bcafa2f
 # ╟─5d38b414-5f41-11eb-14b9-73a9007fc263
+# ╟─bdb51f2e-65d8-11eb-1063-614c91a95e6e
 # ╠═4f81a520-5f6d-11eb-1960-9918ca4f25e9
 # ╠═68fe93ae-5f6e-11eb-012a-81378cd15b41
 # ╠═53585188-5f6f-11eb-0fc0-abbd20ee33fe
@@ -759,10 +780,10 @@ end
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
+# ╠═81b4b31e-65dc-11eb-0045-a5b3fc899efe
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
-# ╠═8281aa22-65a5-11eb-3aca-15502d85d788
 # ╠═c7aa89b0-5f93-11eb-0503-5565bba9cb86
 # ╠═56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
 # ╠═0830c1de-5f9e-11eb-132a-77b3084102b2
