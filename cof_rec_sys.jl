@@ -6,7 +6,7 @@ using InteractiveUtils
 
 # ╔═╡ 92083d94-5b82-11eb-2274-ed62139bbf2d
 begin
-	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall
+	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall, ProgressMeter
 	using ScikitLearn.CrossValidation: train_test_split
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
 	# PyPlot.matplotlib.style.use("https://raw.githubusercontent.com/garrettj403/SciencePlots/master/styles/science.mplstyle")
@@ -205,6 +205,17 @@ struct HyperParam
 	λ::Float64
 end
 
+# ╔═╡ b518d378-65ca-11eb-3bda-adcd26ccaa13
+begin
+	struct HPGrid
+		ks::Array{Int, 1}
+		λs::Array{Float64, 1}
+		n::Int
+	end
+	
+	HPGrid(ks, λs) = HPGrid(ks, sort(λs), length(ks) * length(λs))
+end
+
 # ╔═╡ 1d745ea2-5ba5-11eb-274a-4ff7a65b0cb6
 struct ValidationRun
 	hyper_param::HyperParam
@@ -222,35 +233,33 @@ function min_rmsd(vrs::Array{ValidationRun, 1})
 	return da_best
 end
 
-# ╔═╡ f7158eea-5ba4-11eb-17cc-d57c477cec39
-function hp_grid(ks::Array{Int, 1}, λs::Array{Float64, 1})
-	hps = HyperParam[]
-	for k in ks
-		for λ in λs
-			push!(hps, HyperParam(k, λ))
-		end
-	end
-	return hps
-end
-
 # ╔═╡ 8152d710-5b90-11eb-39f5-45d81aa298ab
 # k = rank of matrix
 # λ = regularization param
 # obs = which observations we train on.
+# (P₀, M₀) ==  initial guess for speed up.
 # gotta pass the transpose for the bias to work.
 function fit_glrm(At::Array{Union{Float64, Missing}, 2}, 
 		          hp::HyperParam,
-		          obs::Array{Tuple{Int64,Int64}, 1})
+		          obs::Array{Tuple{Int64,Int64}, 1};
+				  P₀::Union{Array{Float64, 2}, Nothing}=nothing, 
+		          M₀::Union{Array{Float64, 2}, Nothing}=nothing)
 	# quadratic regularizors
-    rp = QuadReg(hp.λ)
-    rm = QuadReg(hp.λ * n_p / n_m)
+    rp = QuadReg(hp.λ / (2 * n_p))
+    rm = QuadReg(hp.λ / (2 * n_m))
 	# this should be the transpose...
 	@assert size(At) == (n_p, n_m)
 	
+	# guess, same code as glrm.jl
+	if isnothing(P₀) P₀ = randn(hp.k + 1, n_p) end# initialize
+	if isnothing(M₀) M₀ = randn(hp.k + 1, n_m) end
+	
+	# lrm.jl: X'*Y, where X is a kxm matrix and Y is a kxn matrix
 	# A = M' P
 	# At = P' M
 	#   so here X is the analogy of P; Y is the analogy of M
-    glrm = GLRM(At, QuadLoss(), rp, rm, hp.k+1, obs=obs, offset=true)
+    glrm = GLRM(At, QuadLoss(), rp, rm, hp.k+1, 
+		        obs=obs, offset=true, X=P₀, Y=M₀)
 #    init_svd!(glrm)
     P, M, ch = fit!(glrm)
     @assert size(P) == (hp.k + 1, n_p)
@@ -259,6 +268,23 @@ function fit_glrm(At::Array{Union{Float64, Missing}, 2},
     @assert isapprox(impute(glrm), P' * M)
     return P, M, glrm, ch
 end
+
+# ╔═╡ 3aba3150-65cd-11eb-2c51-878ef71193ac
+# begin
+# 	θ = 0.3
+# 	A, θ_true = sim_data_collection(θ)
+	
+# 	# store for later.
+# 	μs, σs = normalize!(A)
+	
+# 	At = collect(A')
+# 	hp = HyperParam(3, 0.4)
+	
+# 	P₀ = randn(hp.k, n_p) # initialize
+# 	M₀ = randn(hp.k, n_m)
+	
+# 	fit_glrm(At, hp, observations(At), P₀=P₀, M₀=M₀)
+# end
 
 # ╔═╡ 21995e36-5f69-11eb-0a95-13d0136099df
 function fit_bias_only_glrm(At::Array{Union{Float64, Missing}, 2},
@@ -307,34 +333,48 @@ end
 md"# hyperparam grid sweep"
 
 # ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
-begin
-	ks = collect(1:3)                       # ranks
-	λs = 10.0 .^ range(-1.0, 3.0, length=4) # regularization params
-	hyper_params = hp_grid(ks, λs)
-end
+hpgrid = HPGrid(collect(1:5),                       # ranks
+				10.0 .^ range(-2.0, 2.0, length=5) # reg params
+				)
 
 # ╔═╡ 9cf75472-5ba0-11eb-371a-5bc338946b61
 # hyperparam sweep
 # return optimal hyperparams with min rmsd
-function hyperparam_sweep(hyper_params::Array{HyperParam, 1}, 
+function hyperparam_sweep(hpgrid::HPGrid, 
 						  At::Array{Union{Float64, Missing}, 2},
 						  ids_train::Array{Tuple{Int64,Int64},1},
-						  ids_valid::Array{Tuple{Int64,Int64},1}
-						 ) 
+						  ids_valid::Array{Tuple{Int64,Int64},1};
+						  show_progress::Bool=false
+						 )
+	pm = Progress(hpgrid.n)
 	valid_runs = ValidationRun[]
-	for hyper_param in hyper_params
-		# train on training data
-		G, P, glrm, ch = fit_glrm(At, hyper_param, ids_train)
-		# impute missing entries
-		Ât = impute(glrm)
-		# evaluate on validation data
-		a = [At[p, m] for (p, m) in ids_valid]
-		â = [Ât[p, m] for (p, m) in ids_valid]
+	sweep_no = 0
+	# order in loop is important
+	for k in hpgrid.ks
+		# for regularization path, start with smallest lambda
+		#     ;don't want to zero out any latent reps!
+		P = randn(k + 1, n_p) # initialize
+		M = randn(k + 1, n_m)
+		for λ in hpgrid.λs
+			sweep_no += 1
+			hyper_param = HyperParam(k, λ)
+			
+			if show_progress
+				update!(pm, sweep_no)
+			end
+			# train on training data
+			P, M, glrm, ch = fit_glrm(At, hyper_param, ids_train, P₀=P, M₀=M)
+			# impute missing entries
+			Ât = impute(glrm)
+			# evaluate on validation data
+			a = [At[p, m] for (p, m) in ids_valid]
+			â = [Ât[p, m] for (p, m) in ids_valid]
 
-		push!(valid_runs, ValidationRun(hyper_param, 
-										rmsd(a, â)
-									   )
-			  )
+			push!(valid_runs, ValidationRun(hyper_param, 
+											rmsd(a, â)
+										   )
+				  )
+		end
 	end
 	
 	return min_rmsd(valid_runs)
@@ -371,7 +411,7 @@ end
 # 5. now that we hv optimal hyper params, retrain on all observed.
 # 6. evaluate it on test entries
 #   return (true values, pred values)
-function run_simulation(θ::Float64)
+function run_simulation(θ::Float64; show_progress::Bool=false)
 	###
 	#    set up data
 	###
@@ -392,7 +432,7 @@ function run_simulation(θ::Float64)
 	#   hyper-parameter sweep using train/valid data 
 	#        to find optimal hyper params (k, λ)
 	###
-	opt_valid_run = hyperparam_sweep(hyper_params, At, ids_train, ids_valid)
+	opt_valid_run = hyperparam_sweep(hpgrid, At, ids_train, ids_valid, show_progress=show_progress)
 
 	###
 	#   deployment time: train model on all observed data
@@ -425,7 +465,7 @@ end
 md"# $\theta=0.4$ example"
 
 # ╔═╡ 4f81a520-5f6d-11eb-1960-9918ca4f25e9
-res = run_simulation(0.4)
+res = run_simulation(0.4, show_progress=true)
 
 # ╔═╡ 68fe93ae-5f6e-11eb-012a-81378cd15b41
 viz_matrix(res.A)
@@ -543,14 +583,12 @@ function viz_prop_latent_space()
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
+	savefig("prop_latent_space.pdf", format="pdf")
 	gcf()
 end
 
 # ╔═╡ ab3a5568-5f88-11eb-373a-2f79bfce3cff
 viz_prop_latent_space()
-
-# ╔═╡ 5e72bb6e-5f89-11eb-33c1-472327869ed1
-properties
 
 # ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
 function color_latent_material_space(p::Int)
@@ -605,14 +643,22 @@ begin
 		return results
 	end
 	
-	θs = 0.1:0.1:0.3
-	θresults = [run_θ_study(θ, 3) for θ in θs]
+	nb_sims = 3
+	θs = 0.1:0.2:0.6
+	θresults = []
+	pm = Progress(length(θs))
+	for (i, θ) in enumerate(θs)
+		push!(θresults, run_θ_study(θ, nb_sims))
+		update!(pm, i)
+	end
 end
+
+# ╔═╡ 8281aa22-65a5-11eb-3aca-15502d85d788
+run_θ_study(.2, 2)
 
 # ╔═╡ c7aa89b0-5f93-11eb-0503-5565bba9cb86
 function viz_ρp_vsθ()
 	fig, axs = plt.subplots(ncols=n_p, figsize=(25, 4.0), sharex=true)
-		# gridspec_kw=Dict("hspace" => 0.25), sharex=true)
 	for (p, ax) in enumerate(axs)
 		if p == 1
 			ax.set_ylabel("Spearman's rank\ncorrelation coefficient\n" * L"$\rho$")
@@ -641,7 +687,7 @@ function viz_ρp_vsθ()
 		ax.plot(θs, ρb_avg, marker="o", linestyle="--")
 		ax.fill_between(θs, ρb_avg .- ρb_std, ρb_avg .+ ρb_std, alpha=0.3)
 		
-		ax.set_title(prop_to_label[properties[p]], fontsize=14, rotation=90)
+		ax.set_title(prop_to_label2[properties[p]], fontsize=14)
 		ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
 	end
 	for ax in axs
@@ -684,10 +730,11 @@ end
 # ╠═5ae47630-5f64-11eb-39f8-654f8d277674
 # ╟─6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 # ╠═8a3c55ae-5ba4-11eb-3354-f9a8feaa7e91
+# ╠═b518d378-65ca-11eb-3bda-adcd26ccaa13
 # ╠═1d745ea2-5ba5-11eb-274a-4ff7a65b0cb6
 # ╠═cc771288-5ba6-11eb-1792-9dfc54c58a8c
-# ╠═f7158eea-5ba4-11eb-17cc-d57c477cec39
 # ╠═8152d710-5b90-11eb-39f5-45d81aa298ab
+# ╠═3aba3150-65cd-11eb-2c51-878ef71193ac
 # ╠═21995e36-5f69-11eb-0a95-13d0136099df
 # ╟─e2dd554c-5baf-11eb-1b49-654d19bedecc
 # ╠═168d4c44-5bb3-11eb-2d16-af69f613b625
@@ -709,13 +756,13 @@ end
 # ╠═c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
 # ╠═8024beae-5f88-11eb-3e97-b7afbbbc6f5c
 # ╠═ab3a5568-5f88-11eb-373a-2f79bfce3cff
-# ╠═5e72bb6e-5f89-11eb-33c1-472327869ed1
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
+# ╠═8281aa22-65a5-11eb-3aca-15502d85d788
 # ╠═c7aa89b0-5f93-11eb-0503-5565bba9cb86
 # ╠═56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
 # ╠═0830c1de-5f9e-11eb-132a-77b3084102b2
