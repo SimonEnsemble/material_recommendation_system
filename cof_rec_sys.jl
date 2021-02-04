@@ -15,6 +15,9 @@ begin
 	Random.seed!(97330)
 end
 
+# ╔═╡ c124085c-667b-11eb-30b0-a52c97cbdc5c
+sbn = pyimport("seaborn")
+
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
 md"# read in data"
 
@@ -192,17 +195,11 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2})
 	ylim([-0.5, size(A)[1]-0.5])
 	xlim([-0.5, size(A)[2]-0.5])
 	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
-		label=L"$A_{ij}$ (normalized)", extend="both", shrink=0.4)
+		label=L"$A_{ij}$ (standardized)", extend="both", shrink=0.4)
 	tight_layout()
 	savefig("matrix_example.pdf", format="pdf")
 	gcf()
 end
-
-# ╔═╡ ba41bf4a-65de-11eb-3795-8d7fb25e98ca
-
-
-# ╔═╡ bdecc3ba-65de-11eb-0804-a1623bb6137e
-
 
 # ╔═╡ 6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 md"# fit low rank model"
@@ -342,7 +339,7 @@ md"# hyperparam grid sweep"
 
 # ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
 hpgrid = HPGrid(collect(1:15),                       # ranks
-				10.0 .^ range(-2.0, 2.0, length=20)  # reg params
+				10.0 .^ range(-1.0, 2.5, length=20)  # reg params
 				)
 
 # ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
@@ -497,8 +494,8 @@ begin
 	# parity plot
 	figure()
 	hexbin(res.a, res.â, mincnt=1, bins="log")
-	xlabel(L"true $A_{ij}$ (normalized)")
-	ylabel(L"predicted $A_{ij}$ (normalized)")
+	xlabel(L"true $A_{ij}$ (standardized)")
+	ylabel(L"predicted $A_{ij}$ (standardized)")
 	xlim([-da_cutoff - δ, da_cutoff + δ])
 	ylim([-da_cutoff - δ, da_cutoff + δ])
 	plot([-da_cutoff, da_cutoff], [-da_cutoff, da_cutoff], 
@@ -528,7 +525,7 @@ begin
 	# 	ha="center", va="center"
 	# 	)
 	legend()
-	ylim([0.0, 1.0])
+	ylim([-0.1, 1.0])
 	tight_layout()
 	savefig("rho_per_gas.pdf", format="pdf")
 	gcf()
@@ -549,13 +546,16 @@ begin
 	bar(ids_best , μ[ids_sort][1:n_show])
 	bar(ids_worst, μ[ids_sort][end-n_show:end])
 	xticks(vcat(ids_best, ids_worst), 
-		   vcat(materials[ids_sort][ids_best], materials[ids_sort][ids_worst]),
+		   vcat(materials[ids_sort][1:n_show], materials[ids_sort][n_m-n_show:n_m]),
 		   rotation=90
 		  )
 	xlim([0, 2 * n_show + n_space + 2])
 	# ylim([-4.25, 4.25])
 	xlabel("COF")
 	ylabel(L"material bias, $\mu_i$")
+	text(3, -1, 
+		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+		ha="center", va="center")
 	
 	scatter((n_show+1):(n_show+n_space), zeros(3), color="k")
 	
@@ -563,6 +563,12 @@ begin
 	savefig("material_bias.pdf", format="pdf")
 	gcf()
 end
+
+# ╔═╡ ce346a40-667c-11eb-03d3-eb7c4510ff26
+df[ids_sort, [:cof, :Name]][1:3, :]
+
+# ╔═╡ 1568fe16-667e-11eb-0ecc-bfd712234906
+df[ids_sort, [:cof, :Name]][end-2:end, :]
 
 # ╔═╡ b0560c02-5f80-11eb-338b-c9cc48b741af
 md"### learn latent space
@@ -584,18 +590,24 @@ end
 
 # ╔═╡ 8024beae-5f88-11eb-3e97-b7afbbbc6f5c
 function viz_prop_latent_space()
+	cs = sbn.color_palette("husl", 16)
+	
 	figure(figsize=(10, 10))
-	scatter(p_vecs[1, :], p_vecs[2, :], edgecolor="k")
+	
 	xlabel("UMAP dimension 1")
 	ylabel("UMAP dimension 2")
 	texts = []
 	for p = 1:n_p
+		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p])
 		push!(texts, 
 			annotate(prop_to_label[properties[p]], 
-				(p_vecs[1, p], p_vecs[2, p]), fontsize=10, ha="center")
+				(p_vecs[1, p], p_vecs[2, p]), fontsize=10, ha="center", color=cs[p])
 			)
 	end
-	adjustText.adjust_text(texts, force_text=(0.01, 0.01))
+	adjustText.adjust_text(texts)
+	text(-2, 4.5, 
+		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+		ha="center", va="center", fontsize=20)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
@@ -614,7 +626,11 @@ function color_latent_material_space(p::Int)
 	xlabel("UMAP dimension 1")
 	ylabel("UMAP dimension 2")
 	colorbar(label=prop_to_label[properties[p]], extend="both")
+	text(-3, 4.5, 
+		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+		ha="center", va="center")
 	gca().set_aspect("equal", "box")
+
 	savefig("latent_mat_space_$p.pdf", format="pdf")
 	tight_layout()
 	gcf()
@@ -626,12 +642,9 @@ color_latent_material_space(15)
 # ╔═╡ 86b00b60-5f89-11eb-071f-bb364af09c2a
 color_latent_material_space(12)
 
-# ╔═╡ 81b4b31e-65dc-11eb-0045-a5b3fc899efe
-
-
 # ╔═╡ 244ce106-65e4-11eb-080b-f52f27e435fc
 function color_latent_material_space_all()
-	fig, axs = subplots(4, 4, sharex=true, sharey=true)
+	fig, axs = subplots(4, 4, sharex=true, sharey=true, figsize=(13, 11))
 	p = 0
 	for i = 1:4
 		for j = 1:4
@@ -640,17 +653,20 @@ function color_latent_material_space_all()
 							  vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
 			# xlabel("UMAP dimension 1")
 			# ylabel("UMAP dimension 2")
-			axs[i, j].set_title(prop_to_label2[property[p]])
+			axs[i, j].set_title(prop_to_label[properties[p]])
 			axs[i, j].set_aspect("equal", "box")
-			if i == 4 and j == 4
-				fig.subplots_adjust(right=0.8)
-				cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-				fig.colorbar(da_plot, cax=cbar_ax, extend="both", 
+			if (i == 4) & (j == 4)
+				cb_ax = fig.add_axes([1.025, 0.1, 0.02, 0.8])
+				fig.colorbar(da_plot, cax=cb_ax, extend="both", 
+					label="standardized value")
+				
+				# fig.colorbar(da_plot, ax=axs[:, :], shrink=0.6)
 			end
 		end
 	end
+	suptitle("COF map colored by adsorption properties")
 	tight_layout()
-	savefig("latent_mat_space.pdf", format="pdf")
+	savefig("latent_mat_space.pdf", format="pdf", bbox_inches="tight")
 	gcf()
 end
 
@@ -691,7 +707,7 @@ begin
 		return results
 	end
 	
-	nb_sims = 5
+	nb_sims = 25
 	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
@@ -762,6 +778,7 @@ end
 
 # ╔═╡ Cell order:
 # ╠═92083d94-5b82-11eb-2274-ed62139bbf2d
+# ╠═c124085c-667b-11eb-30b0-a52c97cbdc5c
 # ╟─ae415fa4-5b82-11eb-0051-072097bb0439
 # ╠═b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 # ╟─bf9ed538-5b82-11eb-1198-3d35a209c5c0
@@ -773,8 +790,6 @@ end
 # ╠═2366b3cc-5b8f-11eb-07e4-61cbc97d5480
 # ╟─6236b296-5f60-11eb-3aa7-5188433b3906
 # ╠═5ae47630-5f64-11eb-39f8-654f8d277674
-# ╟─ba41bf4a-65de-11eb-3795-8d7fb25e98ca
-# ╟─bdecc3ba-65de-11eb-0804-a1623bb6137e
 # ╟─6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 # ╠═8a3c55ae-5ba4-11eb-3354-f9a8feaa7e91
 # ╠═b518d378-65ca-11eb-3bda-adcd26ccaa13
@@ -800,6 +815,8 @@ end
 # ╠═53585188-5f6f-11eb-0fc0-abbd20ee33fe
 # ╠═74068408-5f70-11eb-02ba-417e847034c4
 # ╠═8548a48c-5f73-11eb-3d4f-550078ec546a
+# ╠═ce346a40-667c-11eb-03d3-eb7c4510ff26
+# ╠═1568fe16-667e-11eb-0ecc-bfd712234906
 # ╟─b0560c02-5f80-11eb-338b-c9cc48b741af
 # ╠═ba8ce81e-5f80-11eb-3e39-f942cb6d0d1f
 # ╠═c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
@@ -808,7 +825,6 @@ end
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
-# ╟─81b4b31e-65dc-11eb-0045-a5b3fc899efe
 # ╠═244ce106-65e4-11eb-080b-f52f27e435fc
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
