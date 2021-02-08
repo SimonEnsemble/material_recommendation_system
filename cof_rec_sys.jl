@@ -339,7 +339,7 @@ md"# hyperparam grid sweep"
 
 # ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
 hpgrid = HPGrid(collect(1:15),                       # ranks
-				10.0 .^ range(-1.0, 2.5, length=20)  # reg params
+				10.0 .^ range(-1.0, 2.75, length=25)  # reg params
 				)
 
 # ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
@@ -581,11 +581,15 @@ X = hcat(res.M[1:end-1, :], res.P[1:end-1, :])
 
 # ╔═╡ c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
 begin
-	# input: (a column-major matrix of shape (n_features, n_samples))
-	latent_space = umap(X, 2)
-	m_vecs = latent_space[:, 1:n_m]
-	p_vecs = latent_space[:, (n_m+1):end]
-	@assert size(p_vecs) == (2, n_p)
+	m_vecs = res.M[1:end-1, :]
+	p_vecs = res.P[1:end-1, :]
+	if res.hp.k > 2
+		# input: (a column-major matrix of shape (n_features, n_samples))
+		latent_space = umap(X, 2)
+		m_vecs = latent_space[:, 1:n_m]
+		p_vecs = latent_space[:, (n_m+1):end]
+		@assert size(p_vecs) == (2, n_p)
+	end
 end
 
 # ╔═╡ 8024beae-5f88-11eb-3e97-b7afbbbc6f5c
@@ -594,8 +598,13 @@ function viz_prop_latent_space()
 	
 	figure(figsize=(10, 10))
 	
-	xlabel("UMAP dimension 1")
-	ylabel("UMAP dimension 2")
+	if res.hp.k > 2
+		xlabel("UMAP dimension 1")
+		ylabel("UMAP dimension 2")
+	else
+		xlabel("latent dimension 1")
+		ylabel("latent dimension 2")
+	end
 	texts = []
 	for p = 1:n_p
 		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p])
@@ -605,9 +614,10 @@ function viz_prop_latent_space()
 			)
 	end
 	adjustText.adjust_text(texts)
-	text(-2, 4.5, 
-		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
-		ha="center", va="center", fontsize=20)
+	# text(-2, 4.5, 
+	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+	# 	ha="center", va="center", fontsize=20)
+	legend(title=@sprintf("k = %d\nλ = %.2f", res.hp.k, res.hp.λ))
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
@@ -623,12 +633,18 @@ function color_latent_material_space(p::Int)
 	figure()
 	scatter(m_vecs[1, :], m_vecs[2, :], c=A_n[:, p], s=25, 
 		vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
-	xlabel("UMAP dimension 1")
-	ylabel("UMAP dimension 2")
+	if res.hp.k > 2
+		xlabel("UMAP dimension 1")
+		ylabel("UMAP dimension 2")
+	else
+		xlabel("latent dimension 1")
+		ylabel("latent dimension 2")
+	end
 	colorbar(label=prop_to_label[properties[p]], extend="both")
-	text(-3, 4.5, 
-		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
-		ha="center", va="center")
+	# text(-3, 4.5, 
+	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+	# 	ha="center", va="center")
+	legend(title=@sprintf("k = %d\nλ = %.2f", res.hp.k, res.hp.λ))
 	gca().set_aspect("equal", "box")
 
 	savefig("latent_mat_space_$p.pdf", format="pdf")
@@ -707,7 +723,7 @@ begin
 		return results
 	end
 	
-	nb_sims = 25
+	nb_sims = 50
 	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
@@ -742,8 +758,8 @@ function viz_ρp_vsθ()
 		ρb_avg = [mean([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		ρb_std = [std([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		
-		ax.plot(θs, ρ_avg, marker="o")
-		ax.fill_between(θs, ρ_avg .- ρ_std, ρ_avg .+ ρ_std, alpha=0.3)
+		ax.plot(θs, ρ_avg, marker="o", clip_on=false)
+		ax.fill_between(θs, ρ_avg .- ρ_std, ρ_avg .+ ρ_std, alpha=0.3, clip_on=false)
 		
 		ax.plot(θs, ρb_avg, marker="o", linestyle="--")
 		ax.fill_between(θs, ρb_avg .- ρb_std, ρb_avg .+ ρb_std, alpha=0.3)
