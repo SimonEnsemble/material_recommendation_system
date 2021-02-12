@@ -6,16 +6,16 @@ using InteractiveUtils
 
 # ╔═╡ 6031e0aa-65e0-11eb-1445-d38e02f9e22d
 begin
-	using PyPlot, Random
+	using PyPlot, Random, Statistics
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
 end
 
 # ╔═╡ 8ad981d2-65e0-11eb-28f2-dd661f0880be
-function just_matrix()
+function just_matrix(movies::Bool)
 	
 	Random.seed!(97333)
 	
-	norm = PyPlot.matplotlib.colors.Normalize(vmin=-4.0, vmax=4.0)
+	norm = PyPlot.matplotlib.colors.Normalize(vmin=-1.25, vmax=1.25)
 	cmap = PyPlot.matplotlib.cm.get_cmap("PiYG") # diverging
 	
 	# mapping adsorption properties to colors
@@ -31,7 +31,7 @@ function just_matrix()
 	ylabels = ["materials",  "users"]
 	cbar_labels = ["value", "rating"]
 	θ = 0.4
-	toy_matrix = zeros(Union{Float64, Missing}, 12, 4)
+	toy_matrix = zeros(Union{Float64, Missing}, 20, 6)
 	for ix = 1:size(toy_matrix)[1]
 		for iy = 1:size(toy_matrix)[2]
 			if rand() > θ
@@ -41,34 +41,49 @@ function just_matrix()
 			end
 		end
 	end
-	# if any row is all missing, fill in a random value
+	# if any row or column is all missing, fill in a random value
 	for i = 1:size(toy_matrix)[1]
 		if all(ismissing.(toy_matrix[i, :]))
-			toy_matrix[i, rand(1:size(toy_matrix)[2])] = 1
+			toy_matrix[i, rand(1:size(toy_matrix)[2])] = randn()
 		end
 		if all(.! ismissing.(toy_matrix[i, :]))
 			toy_matrix[i, rand(1:size(toy_matrix)[2])] = missing
 		end
 	end
-		
-	movies = true
+	if movies
+		toy_matrix = toy_matrix'
+	end
+	# normalize cols
+	for j = 1:size(toy_matrix)[2]
+		ids_observed = .! ismissing.(toy_matrix[:, j])
+		μ = mean(toy_matrix[ids_observed, j])
+		σ = std(toy_matrix[ids_observed, j])
+		toy_matrix[:, j] = (toy_matrix[:, j] .- μ) / σ
+	end
 
-	figure(figsize=(2.65, 4))
+	if movies
+		figure(figsize=(6, 2.6))
+		
+	else
+		figure(figsize=(2.6, 5))
+	end
 	ax = gca()
 	is = imshow(a_to_color.(toy_matrix))
-	xticks([])
-	yticks([])
 	ylim([-0.5, size(toy_matrix)[1]-0.5])
 	xlim([-0.5, size(toy_matrix)[2]-0.5])
-	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), extend="both", shrink=0.5, ticks=[0], label=movies ? "rating" : "value")
+	xticks([])
+	yticks([])
+
+	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), shrink=0.5, ticks=[0], label=movies ? "rating" : "value")
 	if movies
-		xlabel("← movies →")
-		ylabel("← users →")
+		ylabel("← products →")
+		xlabel("← users →")
 		tight_layout()
 		savefig("um_toy_matrix.pdf", format="pdf")
 	else
-		xlabel("← materials →")
-		ylabel("← properties →")
+		xlabel("← properties →")
+		ylabel("← materials →")
+		
 		tight_layout()
 		savefig("mp_toy_matrix.pdf", format="pdf")
 	end
@@ -76,9 +91,13 @@ function just_matrix()
 end
 
 # ╔═╡ 975d209e-65e0-11eb-3220-fdf3e66b1743
-just_matrix()
+just_matrix(true)
+
+# ╔═╡ 3e556e5a-6d64-11eb-100b-29093f91e0ee
+just_matrix(false)
 
 # ╔═╡ Cell order:
 # ╠═6031e0aa-65e0-11eb-1445-d38e02f9e22d
 # ╠═8ad981d2-65e0-11eb-28f2-dd661f0880be
 # ╠═975d209e-65e0-11eb-3220-fdf3e66b1743
+# ╠═3e556e5a-6d64-11eb-100b-29093f91e0ee
