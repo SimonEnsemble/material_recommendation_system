@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.12.20
+# v0.12.21
 
 using Markdown
 using InteractiveUtils
@@ -96,8 +96,72 @@ just_matrix(true)
 # ╔═╡ 3e556e5a-6d64-11eb-100b-29093f91e0ee
 just_matrix(false)
 
+# ╔═╡ fac4ef18-7f08-11eb-0dfb-a99468b3340c
+function very_toy()
+	
+	Random.seed!(97336)
+	
+	norm = PyPlot.matplotlib.colors.Normalize(vmin=0.0, vmax=1.0)
+	cmap = PyPlot.matplotlib.cm.get_cmap("plasma") # diverging
+	
+	# mapping adsorption properties to colors
+	function a_to_color(a::Union{Float64, Missing})
+		if ismissing(a)
+			return (1.0, 1.0, 1.0, 1.0)
+		else
+			return cmap(norm(a))
+		end
+	end
+	
+	θ = 0.7
+	toy_matrix = zeros(Union{Float64, Missing}, 5, 3)
+	for ix = 1:size(toy_matrix)[1]
+		for iy = 1:size(toy_matrix)[2]
+			if rand() > θ
+				toy_matrix[ix, iy] = missing
+			else
+				toy_matrix[ix, iy] = randn()
+			end
+		end
+	end
+	# if any row or column is all missing, fill in a random value
+	for i = 1:size(toy_matrix)[1]
+		if all(ismissing.(toy_matrix[i, :]))
+			toy_matrix[i, rand(1:size(toy_matrix)[2])] = rand()
+		end
+		if all(.! ismissing.(toy_matrix[i, :]))
+			toy_matrix[i, rand(1:size(toy_matrix)[2])] = missing
+		end
+	end
+
+	figure(figsize=(2.6, 5))
+	ax = gca()
+	is = imshow(a_to_color.(toy_matrix))
+	hlines([i - 0.5 for i = 0:size(toy_matrix)[1]], 
+		-0.5, size(toy_matrix)[2]-0.5, 
+		color="k", clip_on=false)
+	vlines([i - 0.5 for i = 0:size(toy_matrix)[2]], 
+		-0.5, size(toy_matrix)[1]-0.5, 
+		color="k", clip_on=false)
+	ylim([-0.5, size(toy_matrix)[1]-0.5])
+	xlim([-0.5, size(toy_matrix)[2]-0.5])
+	xticks([])
+	yticks([])
+
+	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap), shrink=0.5, ticks=[0], label="value")
+
+	tight_layout()
+	savefig("very_toy_matrix.png", format="png", dpi=400)
+	gcf()
+end
+
+# ╔═╡ 3d88200e-7f09-11eb-179a-afe22a3461f3
+very_toy()
+
 # ╔═╡ Cell order:
 # ╠═6031e0aa-65e0-11eb-1445-d38e02f9e22d
 # ╠═8ad981d2-65e0-11eb-28f2-dd661f0880be
 # ╠═975d209e-65e0-11eb-3220-fdf3e66b1743
 # ╠═3e556e5a-6d64-11eb-100b-29093f91e0ee
+# ╠═fac4ef18-7f08-11eb-0dfb-a99468b3340c
+# ╠═3d88200e-7f09-11eb-179a-afe22a3461f3
