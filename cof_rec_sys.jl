@@ -1,22 +1,23 @@
 ### A Pluto.jl notebook ###
-# v0.12.20
+# v0.12.21
 
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 92083d94-5b82-11eb-2274-ed62139bbf2d
+# ╔═╡ 92502b2a-7f83-11eb-152b-f10d7015d5cc
 begin
+	using Pkg; Pkg.activate("Project.toml"); Pkg.instantiate()
+	
 	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall, ProgressMeter, Random
 	using ScikitLearn.CrossValidation: train_test_split
+	
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
-	# PyPlot.matplotlib.style.use("https://raw.githubusercontent.com/garrettj403/SciencePlots/master/styles/science.mplstyle")
+	
 	adjustText = pyimport("adjustText")
+	sbn = pyimport("seaborn")
 	
 	Random.seed!(97330)
 end
-
-# ╔═╡ c124085c-667b-11eb-30b0-a52c97cbdc5c
-sbn = pyimport("seaborn")
 
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
 md"# read in data"
@@ -40,7 +41,7 @@ begin
 	rename!(df_names, Symbol("CURATED-COFs ID") => :cof)
 	df_names = df_names[:, [:cof, :Name]]
 	
-	df = join(df, df_names, on=:cof, kind=:left)
+	df = leftjoin(df, df_names, on=:cof)
 	
 	first(df, 10)
 end
@@ -130,16 +131,15 @@ md"# simulate data collection"
 # ╔═╡ 2931005c-5b8d-11eb-2375-5dacf441be72
 # θ: target fraction observed values
 function sim_data_collection(θ::Float64)
-    distn = Bernoulli(θ) # for observing it
+	nb_observed = floor(Int, θ * n_m * n_p)
+	# sample observed tuples
+    Ω = sample([(m, p) for m = 1:n_m, p = 1:n_p][:], nb_observed, replace=false)
+	# construct incomplete matrix
     A = zeros(Union{Float64, Missing}, n_m, n_p)
-	for m = 1:n_m
-		for p = 1:n_p
-			if rand(distn)
-				A[m, p] = A_complete_unnormalized[m, p]
-			else
-				A[m, p] = missing
-			end
-		end
+	fill!(A, missing) # default missing
+	# fill in observed values
+	for (m, p) in Ω
+		A[m, p] = A_complete_unnormalized[m, p]
 	end
 	θ_true = 1.0 - sum(ismissing.(A)) / (n_m * n_p)
     return A, θ_true
@@ -225,6 +225,7 @@ end
 struct ValidationRun
 	hyper_param::HyperParam
 	rmsd::Float64
+	ρ::Float64
 end
 
 # ╔═╡ cc771288-5ba6-11eb-1792-9dfc54c58a8c
@@ -232,6 +233,17 @@ function min_rmsd(vrs::Array{ValidationRun, 1})
 	da_best = vrs[1]
 	for i = 2:length(vrs)
 		if vrs[i].rmsd < da_best.rmsd
+			da_best = vrs[i]
+		end
+	end
+	return da_best
+end
+
+# ╔═╡ 080ce23a-6e32-11eb-14b0-c3d43725f78a
+function max_ρ(vrs::Array{ValidationRun, 1})
+	da_best = vrs[1]
+	for i = 2:length(vrs)
+		if vrs[i].ρ > da_best.ρ
 			da_best = vrs[i]
 		end
 	end
@@ -379,13 +391,14 @@ function hyperparam_sweep(hpgrid::HPGrid,
 			â = [Ât[p, m] for (p, m) in ids_valid]
 
 			push!(valid_runs, ValidationRun(hyper_param, 
-											rmsd(a, â)
+											rmsd(a, â),
+											corspearman(a, â)
 										   )
 				  )
 		end
 	end
-	
-	return min_rmsd(valid_runs)
+	# return min_rmse(valid_runs)
+	return max_ρ(valid_runs)
 end
 
 # ╔═╡ 2009751a-5bae-11eb-158f-a3d9cb98fe24
@@ -500,10 +513,10 @@ begin
 	ylim([-da_cutoff - δ, da_cutoff + δ])
 	plot([-da_cutoff, da_cutoff], [-da_cutoff, da_cutoff], 
 		linestyle="--", color="gray")
-	text(4, -4, 
-		@sprintf("hyperparameters:\nk = %d\nλ = %.2f\n\nperformance:\nρ = %.2f\nRMSE = %.2f", res.hp.k, res.hp.λ, corspearman(res.a, res.â), rmsd(res.a, res.â)),
-		ha="center", va="center"
-		)
+	# text(4, -4, 
+	legend(title=@sprintf("hyperparameters:\nk = %d\nλ = %.2f\n\nperformance:\nρ = %.2f\nRMSE = %.2f", res.hp.k, res.hp.λ, corspearman(res.a, res.â), rmsd(res.a, res.â)))
+		# ha="center", va="center"
+		# )
 	colorbar(label="# (COF, adsorption property) pairs")
 	gca().set_aspect("equal", "box")
 	tight_layout()
@@ -553,9 +566,7 @@ begin
 	# ylim([-4.25, 4.25])
 	xlabel("COF")
 	ylabel(L"material bias, $\mu_i$")
-	text(3, -1, 
-		@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
-		ha="center", va="center")
+	legend(title=@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ))
 	
 	scatter((n_show+1):(n_show+n_space), zeros(3), color="k")
 	
@@ -618,6 +629,8 @@ function viz_prop_latent_space()
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
 	legend(title=@sprintf("k = %d\nλ = %.2f", res.hp.k, res.hp.λ))
+	axvline(x=0.0, color="lightgray", zorder=0)
+	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
@@ -640,6 +653,8 @@ function color_latent_material_space(p::Int)
 		xlabel("latent dimension 1")
 		ylabel("latent dimension 2")
 	end
+	axvline(x=0.0, color="lightgray", zorder=0)
+	axhline(y=0.0, color="lightgray", zorder=0)
 	colorbar(label=prop_to_label[properties[p]], extend="both")
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
@@ -678,6 +693,8 @@ function color_latent_material_space_all()
 				
 				# fig.colorbar(da_plot, ax=axs[:, :], shrink=0.6)
 			end
+			axs[i, j].axvline(x=0.0, color="lightgray", zorder=0)
+			axs[i, j].axhline(y=0.0, color="lightgray", zorder=0)
 		end
 	end
 	suptitle("COF map colored by adsorption properties")
@@ -723,7 +740,7 @@ begin
 		return results
 	end
 	
-	nb_sims = 50
+	nb_sims = 3
 	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
@@ -793,8 +810,7 @@ begin
 end
 
 # ╔═╡ Cell order:
-# ╠═92083d94-5b82-11eb-2274-ed62139bbf2d
-# ╠═c124085c-667b-11eb-30b0-a52c97cbdc5c
+# ╠═92502b2a-7f83-11eb-152b-f10d7015d5cc
 # ╟─ae415fa4-5b82-11eb-0051-072097bb0439
 # ╠═b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 # ╟─bf9ed538-5b82-11eb-1198-3d35a209c5c0
@@ -811,6 +827,7 @@ end
 # ╠═b518d378-65ca-11eb-3bda-adcd26ccaa13
 # ╠═1d745ea2-5ba5-11eb-274a-4ff7a65b0cb6
 # ╠═cc771288-5ba6-11eb-1792-9dfc54c58a8c
+# ╠═080ce23a-6e32-11eb-14b0-c3d43725f78a
 # ╠═8152d710-5b90-11eb-39f5-45d81aa298ab
 # ╠═3aba3150-65cd-11eb-2c51-878ef71193ac
 # ╠═21995e36-5f69-11eb-0a95-13d0136099df
