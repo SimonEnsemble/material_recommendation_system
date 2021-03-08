@@ -16,7 +16,8 @@ begin
 	adjustText = pyimport("adjustText")
 	sbn = pyimport("seaborn")
 	
-	Random.seed!(97330)
+	const my_seed = 97330
+	Random.seed!(my_seed)
 end
 
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
@@ -173,7 +174,7 @@ md"# matrix viz"
 
 # ╔═╡ 5ae47630-5f64-11eb-39f8-654f8d277674
 function viz_matrix(A::Array{Union{Float64, Missing}, 2})
-	norm = PyPlot.matplotlib.colors.Normalize(vmin=-4.0, vmax=4.0)
+	norm = PyPlot.matplotlib.colors.Normalize(vmin=-3.0, vmax=3.0)
 	cmap = PyPlot.matplotlib.cm.get_cmap("PiYG") # diverging
 	
 	# mapping adsorption properties to colors
@@ -195,7 +196,7 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2})
 	ylim([-0.5, size(A)[1]-0.5])
 	xlim([-0.5, size(A)[2]-0.5])
 	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
-		label=L"$A_{ij}$ (standardized)", extend="both", shrink=0.4)
+		label=L"$A_{mp}$ (standardized)", extend="both", shrink=0.4)
 	tight_layout()
 	savefig("matrix_example.pdf", format="pdf")
 	gcf()
@@ -262,8 +263,8 @@ function fit_glrm(At::Array{Union{Float64, Missing}, 2},
 				  P₀::Union{Array{Float64, 2}, Nothing}=nothing, 
 		          M₀::Union{Array{Float64, 2}, Nothing}=nothing)
 	# quadratic regularizors
-    rp = QuadReg(hp.λ / (2 * n_p))
-    rm = QuadReg(hp.λ / (2 * n_m))
+    rp = QuadReg(hp.λ / n_p)
+    rm = QuadReg(hp.λ / n_m)
 	# this should be the transpose...
 	@assert size(At) == (n_p, n_m)
 	
@@ -351,7 +352,7 @@ md"# hyperparam grid sweep"
 
 # ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
 hpgrid = HPGrid(collect(1:15),                       # ranks
-				10.0 .^ range(-1.0, 2.75, length=25)  # reg params
+				10.0 .^ range(1.0, 3.0, length=25)  # reg params
 				)
 
 # ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
@@ -447,7 +448,8 @@ function run_simulation(θ::Float64; show_progress::Bool=false)
 	ids_obs, ids_unobs = ids_obs_and_unobs(At)
 	ids_test = ids_unobs
 	@assert(all(ismissing.([At[p, m] for (p, m) in ids_test])))
-	ids_train, ids_valid = train_test_split(ids_obs, test_size=0.2, shuffle=true)
+	ids_train, ids_valid = train_test_split(ids_obs, test_size=0.2, 
+		shuffle=true, random_state=floor(Int, my_seed + 100 * θ))
 
 	###
 	#   hyper-parameter sweep using train/valid data 
@@ -507,8 +509,8 @@ begin
 	# parity plot
 	figure()
 	hexbin(res.a, res.â, mincnt=1, bins="log")
-	xlabel(L"true $A_{ij}$ (standardized)")
-	ylabel(L"predicted $A_{ij}$ (standardized)")
+	xlabel(L"true $A_{mp}$ (standardized)")
+	ylabel(L"predicted $A_{mp}$ (standardized)")
 	xlim([-da_cutoff - δ, da_cutoff + δ])
 	ylim([-da_cutoff - δ, da_cutoff + δ])
 	plot([-da_cutoff, da_cutoff], [-da_cutoff, da_cutoff], 
@@ -526,12 +528,18 @@ end
 
 # ╔═╡ 74068408-5f70-11eb-02ba-417e847034c4
 begin
+	# plot in sorted order
+	ids_props_sorted = sortperm(res.ρp, rev=true)
+		
 	figure(figsize=(10, 4.8))
-	bar(1:n_p, res.ρp, label=@sprintf("k = %d, λ = %.2f", res.hp.k, res.hp.λ))
-	scatter(1:n_p, res.ρpb, marker="*", zorder=100, s=150, 
+	bar(1:n_p, res.ρp[ids_props_sorted], 
+		label=@sprintf("k = %d, λ = %.2f", res.hp.k, res.hp.λ)
+	)
+	scatter(1:n_p, res.ρpb[ids_props_sorted], marker="*", zorder=100, s=160, 
 		    ec="k", label="k = 0"
-		    )
-	xticks(1:n_p, [prop_to_label[p] for p in properties], rotation=90)
+	)
+	xlim([0.5, n_p+0.5])
+	xticks(1:n_p, [prop_to_label[p] for p in properties[ids_props_sorted]], rotation=90)
 	ylabel("Spearman's rank\ncorrelation coefficient\n"  * L"$\rho$")
 	# text(12.0, 0.9,
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
@@ -556,8 +564,8 @@ begin
 	ids_worst = (n_show + n_space + 1):(2 * n_show + n_space + 1)
 	
 	figure(figsize=(10.0, 4.8))
-	bar(ids_best , μ[ids_sort][1:n_show])
-	bar(ids_worst, μ[ids_sort][end-n_show:end])
+	bar(ids_best , μ[ids_sort][1:n_show], color="C3")
+	bar(ids_worst, μ[ids_sort][end-n_show:end], color="C4")
 	xticks(vcat(ids_best, ids_worst), 
 		   vcat(materials[ids_sort][1:n_show], materials[ids_sort][n_m-n_show:n_m]),
 		   rotation=90
@@ -607,7 +615,7 @@ end
 function viz_prop_latent_space()
 	cs = sbn.color_palette("husl", 16)
 	
-	figure(figsize=(10, 10))
+	figure(figsize=(8, 8))
 	
 	if res.hp.k > 2
 		xlabel("UMAP dimension 1")
@@ -621,10 +629,13 @@ function viz_prop_latent_space()
 		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p])
 		push!(texts, 
 			annotate(prop_to_label[properties[p]], 
-				(p_vecs[1, p], p_vecs[2, p]), fontsize=10, ha="center", color=cs[p])
+				(p_vecs[1, p], p_vecs[2, p]), 
+				fontsize=10, ha="center", color=cs[p]
+				# arrowprops=Dict(:facecolor="gray", :shrink=0.05)
+			)
 			)
 	end
-	adjustText.adjust_text(texts)
+	adjustText.adjust_text(texts, force_text=0.01, force_points=0.01, avoid_self=false)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
@@ -740,7 +751,7 @@ begin
 		return results
 	end
 	
-	nb_sims = 3
+	nb_sims = 50
 	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
@@ -752,17 +763,17 @@ end
 
 # ╔═╡ c7aa89b0-5f93-11eb-0503-5565bba9cb86
 function viz_ρp_vsθ()
-	fig, axs = plt.subplots(ncols=n_p, figsize=(25, 4.0), sharex=true)
+	fig, axs = plt.subplots(nrows=2, ncols=8, figsize=(13, 5.5), sharex=true)
 	for (p, ax) in enumerate(axs)
-		if p == 1
+		if p == 1 || p == 2
 			ax.set_ylabel("Spearman's rank\ncorrelation coefficient\n" * L"$\rho$")
 		else
 			ax.spines["left"].set_visible(false)
 			# ax.yaxis.set_visible(false)
 			ax.set_yticklabels([])
 		end
-		if p == floor(Int, n_p/2)
-			ax.set_xlabel(L"target fraction observed entries, $\theta$")
+		if p % 2 == 0
+			ax.set_xlabel(L"$\theta$")
 		end
 		ax.spines["right"].set_visible(false)
 		ax.spines["bottom"].set_position("zero")
@@ -775,10 +786,10 @@ function viz_ρp_vsθ()
 		ρb_avg = [mean([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		ρb_std = [std([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		
-		ax.plot(θs, ρ_avg, marker="o", clip_on=false)
+		ax.plot(θs, ρ_avg, marker="o", clip_on=false, markeredgecolor="k")
 		ax.fill_between(θs, ρ_avg .- ρ_std, ρ_avg .+ ρ_std, alpha=0.3, clip_on=false)
 		
-		ax.plot(θs, ρb_avg, marker="o", linestyle="--")
+		ax.plot(θs, ρb_avg, marker="*", clip_on=false, markeredgecolor="k")
 		ax.fill_between(θs, ρb_avg .- ρb_std, ρb_avg .+ ρb_std, alpha=0.3)
 		
 		ax.set_title(prop_to_label2[properties[p]], fontsize=14)
