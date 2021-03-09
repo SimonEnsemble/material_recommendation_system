@@ -173,7 +173,7 @@ end
 md"# matrix viz"
 
 # ╔═╡ 5ae47630-5f64-11eb-39f8-654f8d277674
-function viz_matrix(A::Array{Union{Float64, Missing}, 2})
+function viz_matrix(A::Array{Union{Float64, Missing}, 2}; θ::Float64)
 	norm = PyPlot.matplotlib.colors.Normalize(vmin=-3.0, vmax=3.0)
 	cmap = PyPlot.matplotlib.cm.get_cmap("PiYG") # diverging
 	
@@ -197,6 +197,7 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2})
 	xlim([-0.5, size(A)[2]-0.5])
 	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
 		label=L"$A_{mp}$ (standardized)", extend="both", shrink=0.4)
+	title(@sprintf("θ = %.1f", θ), fontsize=12)
 	tight_layout()
 	savefig("matrix_example.pdf", format="pdf")
 	gcf()
@@ -487,6 +488,9 @@ end
 # ╔═╡ 5d38b414-5f41-11eb-14b9-73a9007fc263
 md"# $\theta=0.4$ example"
 
+# ╔═╡ 128a9fa0-808b-11eb-22f0-afd1dd30593c
+θ = 0.4
+
 # ╔═╡ bdb51f2e-65d8-11eb-1063-614c91a95e6e
 
 
@@ -494,7 +498,7 @@ md"# $\theta=0.4$ example"
 @time res = run_simulation(0.4, show_progress=true)
 
 # ╔═╡ 68fe93ae-5f6e-11eb-012a-81378cd15b41
-viz_matrix(res.A)
+viz_matrix(res.A, θ=θ)
 
 # ╔═╡ 53585188-5f6f-11eb-0fc0-abbd20ee33fe
 begin
@@ -516,7 +520,7 @@ begin
 	plot([-da_cutoff, da_cutoff], [-da_cutoff, da_cutoff], 
 		linestyle="--", color="gray")
 	# text(4, -4, 
-	legend(title=@sprintf("hyperparameters:\nk = %d\nλ = %.2f\n\nperformance:\nρ = %.2f\nRMSE = %.2f", res.hp.k, res.hp.λ, corspearman(res.a, res.â), rmsd(res.a, res.â)))
+	legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f\n\nperformance:\nρ = %.2f\nRMSE = %.2f", θ, res.hp.k, res.hp.λ, corspearman(res.a, res.â), rmsd(res.a, res.â)))
 		# ha="center", va="center"
 		# )
 	colorbar(label="# (COF, adsorption property) pairs")
@@ -533,10 +537,10 @@ begin
 		
 	figure(figsize=(10, 4.8))
 	bar(1:n_p, res.ρp[ids_props_sorted], 
-		label=@sprintf("k = %d, λ = %.2f", res.hp.k, res.hp.λ)
+		label=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ)
 	)
 	scatter(1:n_p, res.ρpb[ids_props_sorted], marker="*", zorder=100, s=160, 
-		    ec="k", label="k = 0"
+		    ec="k", label=@sprintf("θ = %.1f, k = 0", θ)
 	)
 	xlim([0.5, n_p+0.5])
 	xticks(1:n_p, [prop_to_label[p] for p in properties[ids_props_sorted]], rotation=90)
@@ -574,7 +578,7 @@ begin
 	# ylim([-4.25, 4.25])
 	xlabel("COF")
 	ylabel(L"material bias, $\mu_i$")
-	legend(title=@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ))
+	legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	
 	scatter((n_show+1):(n_show+n_space), zeros(3), color="k")
 	
@@ -635,11 +639,11 @@ function viz_prop_latent_space()
 			)
 			)
 	end
-	adjustText.adjust_text(texts, force_text=0.01, force_points=0.01, avoid_self=false)
+	adjustText.adjust_text(texts, force_text=0.01, force_points=0.01)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
-	legend(title=@sprintf("k = %d\nλ = %.2f", res.hp.k, res.hp.λ))
+	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
@@ -670,7 +674,7 @@ function color_latent_material_space(p::Int)
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
-	legend(title=@sprintf("k = %d\nλ = %.2f", res.hp.k, res.hp.λ))
+	legend(title=@sprintf("θ = %.1f\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	gca().set_aspect("equal", "box")
 
 	savefig("latent_mat_space_$p.pdf", format="pdf")
@@ -853,6 +857,7 @@ end
 # ╠═09b74408-5baa-11eb-3735-e9333756f565
 # ╠═b285e2fe-5ba7-11eb-2e12-83e72bcafa2f
 # ╟─5d38b414-5f41-11eb-14b9-73a9007fc263
+# ╠═128a9fa0-808b-11eb-22f0-afd1dd30593c
 # ╟─bdb51f2e-65d8-11eb-1063-614c91a95e6e
 # ╠═4f81a520-5f6d-11eb-1960-9918ca4f25e9
 # ╠═68fe93ae-5f6e-11eb-012a-81378cd15b41
