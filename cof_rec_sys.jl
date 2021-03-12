@@ -188,7 +188,7 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2}; θ::Float64)
 	
 	figure(figsize=(4, 15))
 	ax = gca()
-	is = imshow(a_to_color.(A))
+	is = imshow(a_to_color.(A), interpolation="None")
 	xlabel("gas\nadsorption\nproperties")
 	ylabel("COFs")
 	xticks([])
