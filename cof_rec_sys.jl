@@ -726,9 +726,9 @@ function color_latent_material_space(p::Int)
 	divider = axes_grid1.make_axes_locatable(ax)
 	cax = divider.append_axes("right", size="5%", pad="2%")
 	colorbar(label=prop_to_label[properties[p]], extend="both", cax=cax)
-
-	savefig("latent_mat_space_$p.pdf", format="pdf")
 	tight_layout()
+	savefig("latent_mat_space_$p.pdf", format="pdf")
+	
 	gcf()
 end
 
