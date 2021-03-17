@@ -688,6 +688,9 @@ color_latent_material_space(15)
 # ╔═╡ 86b00b60-5f89-11eb-071f-bb364af09c2a
 color_latent_material_space(12)
 
+# ╔═╡ ccf77948-86b5-11eb-28ce-69ff4f7c2f20
+color_latent_material_space(11)
+
 # ╔═╡ 244ce106-65e4-11eb-080b-f52f27e435fc
 function color_latent_material_space_all()
 	fig, axs = subplots(4, 4, sharex=true, sharey=true, figsize=(13, 11))
@@ -874,6 +877,7 @@ end
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
+# ╠═ccf77948-86b5-11eb-28ce-69ff4f7c2f20
 # ╠═244ce106-65e4-11eb-080b-f52f27e435fc
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
