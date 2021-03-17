@@ -634,7 +634,7 @@ function viz_prop_latent_space()
 	end
 	texts = []
 	for p = 1:n_p
-		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p])
+		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p], marker="s")
 		push!(texts, 
 			annotate(prop_to_label[properties[p]], 
 				(p_vecs[1, p], p_vecs[2, p]), 
@@ -658,7 +658,7 @@ function viz_prop_latent_space()
 end
 
 # ╔═╡ 2b5e6c72-86c4-11eb-0f34-47ce8229002d
-function viz_prop_latent_space(which_props::Array{Int64, 1})
+function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 	figure()
 	
 	if res.hp.k > 2
@@ -670,16 +670,16 @@ function viz_prop_latent_space(which_props::Array{Int64, 1})
 	end
 	texts = []
 	for p in which_props
-		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color="C6")
+		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color="C5", marker="s")
 		push!(texts, 
 			annotate(prop_to_label[properties[p]], 
 				(p_vecs[1, p], p_vecs[2, p]), 
-				fontsize=10, ha="center", color="C6"
+				fontsize=10, ha="center", color="C5"
 				# arrowprops=Dict(:facecolor="gray", :shrink=0.05)
 			)
 			)
 	end
-	adjustText.adjust_text(texts)#, force_text=0.01, force_points=0.01)
+	adjustText.adjust_text(texts, force_text=0.02, force_points=3.0)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
@@ -688,6 +688,7 @@ function viz_prop_latent_space(which_props::Array{Int64, 1})
 	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
+	title("map of adsorption propeties")
 	tight_layout()
 	savefig("prop_latent_space_few.pdf", format="pdf")
 	gcf()
@@ -697,49 +698,56 @@ end
 viz_prop_latent_space()
 
 # ╔═╡ ab6a733c-86c3-11eb-0318-c19912136e3d
-viz_prop_latent_space([12, 11, 15])
+viz_prop_latent_space_some([12, 11, 15])
 
 # ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
-function color_latent_material_space(p::Int)
-	figure()
+function color_latent_material_space()
+	prop_ids = [15, 12, 11]
+	
+	figs, axs = subplots(1, 3, figsize=(6.4*3, 4.8), sharey=true)
+	plot_to_color = nothing
+	for i = 1:3
 	# scatter(p_vecs[1, p], p_vecs[2, p], marker="x", s=45, zorder=1000, color="k")
-	scatter(m_vecs[1, :], m_vecs[2, :], c=A_n[:, p], s=25, 
-		vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+		plot_to_color = axs[i].scatter(
+			m_vecs[1, :], m_vecs[2, :], c=A_n[:, prop_ids[i]], s=75, 
+			vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+		
+		axs[i].axvline(x=0.0, color="lightgray", zorder=0)
+		axs[i].axhline(y=0.0, color="lightgray", zorder=0)
+		axs[i].set_aspect("equal", "box")
+		axs[i].set_title("color: " * replace(prop_to_label[properties[prop_ids[i]]], "\n" => " "))
+	end
 	# for colorbar to be right height
 	# https://stackoverflow.com/questions/18195758/set-matplotlib-colorbar-size-to-match-graph
 
-	if res.hp.k > 2
-		xlabel("UMAP dimension 1")
-		ylabel("UMAP dimension 2")
-	else
-		xlabel("latent dimension 1")
-		ylabel("latent dimension 2")
-	end
-	axvline(x=0.0, color="lightgray", zorder=0)
-	axhline(y=0.0, color="lightgray", zorder=0)
+	# if res.hp.k > 2
+		axs[1].set_ylabel("UMAP dimension 2")
+		for i = 1:3
+			axs[i].set_xlabel("UMAP dimension 1")
+		end
+	# else
+	# 	xlabel("latent dimension 1")
+	# 	ylabel("latent dimension 2")
+	# end
+
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
-	legend(title=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ))
+	axs[3].legend(title=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ))
 	ax = gca()
-	ax.set_aspect("equal", "box")
+	
 	divider = axes_grid1.make_axes_locatable(ax)
-	cax = divider.append_axes("right", size="5%", pad="2%")
-	colorbar(label=prop_to_label[properties[p]], extend="both", cax=cax)
+	cax = divider.append_axes("right", size="3%", pad="2%")
+	colorbar(plot_to_color, label="standardized property value", extend="both", cax=cax)
+	suptitle("map of COFs", fontsize=25)
 	tight_layout()
-	savefig("latent_mat_space_$p.pdf", format="pdf")
+	savefig("latent_mat_space_few.pdf", format="pdf")
 	
 	gcf()
 end
 
 # ╔═╡ b0619008-5f86-11eb-11b6-c7a3c4db9fd3
-color_latent_material_space(15)
-
-# ╔═╡ 86b00b60-5f89-11eb-071f-bb364af09c2a
-color_latent_material_space(12)
-
-# ╔═╡ ccf77948-86b5-11eb-28ce-69ff4f7c2f20
-color_latent_material_space(11)
+color_latent_material_space()
 
 # ╔═╡ 244ce106-65e4-11eb-080b-f52f27e435fc
 function color_latent_material_space_all()
@@ -935,8 +943,6 @@ end
 # ╠═ab6a733c-86c3-11eb-0318-c19912136e3d
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
-# ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
-# ╠═ccf77948-86b5-11eb-28ce-69ff4f7c2f20
 # ╠═244ce106-65e4-11eb-080b-f52f27e435fc
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
