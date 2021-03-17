@@ -15,10 +15,14 @@ begin
 	
 	adjustText = pyimport("adjustText")
 	sbn = pyimport("seaborn")
+	axes_grid1 = pyimport("mpl_toolkits.axes_grid1")
 	
 	const my_seed = 97330
 	Random.seed!(my_seed)
 end
+
+# ╔═╡ 43935790-86c3-11eb-3b21-cde10d72855b
+
 
 # ╔═╡ ae415fa4-5b82-11eb-0051-072097bb0439
 md"# read in data"
@@ -653,14 +657,57 @@ function viz_prop_latent_space()
 	gcf()
 end
 
+# ╔═╡ 2b5e6c72-86c4-11eb-0f34-47ce8229002d
+function viz_prop_latent_space(which_props::Array{Int64, 1})
+	figure()
+	
+	if res.hp.k > 2
+		xlabel("UMAP dimension 1")
+		ylabel("UMAP dimension 2")
+	else
+		xlabel("latent dimension 1")
+		ylabel("latent dimension 2")
+	end
+	texts = []
+	for p in which_props
+		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color="C6")
+		push!(texts, 
+			annotate(prop_to_label[properties[p]], 
+				(p_vecs[1, p], p_vecs[2, p]), 
+				fontsize=10, ha="center", color="C6"
+				# arrowprops=Dict(:facecolor="gray", :shrink=0.05)
+			)
+			)
+	end
+	adjustText.adjust_text(texts)#, force_text=0.01, force_points=0.01)
+	# text(-2, 4.5, 
+	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
+	# 	ha="center", va="center", fontsize=20)
+	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ), loc="best")
+	axvline(x=0.0, color="lightgray", zorder=0)
+	axhline(y=0.0, color="lightgray", zorder=0)
+	# colorbar(label=prop_to_label[properties[p]], extend="both")
+	gca().set_aspect("equal", "box")
+	tight_layout()
+	savefig("prop_latent_space_few.pdf", format="pdf")
+	gcf()
+end
+
 # ╔═╡ ab3a5568-5f88-11eb-373a-2f79bfce3cff
 viz_prop_latent_space()
+
+# ╔═╡ ab6a733c-86c3-11eb-0318-c19912136e3d
+viz_prop_latent_space([12, 11, 15])
 
 # ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
 function color_latent_material_space(p::Int)
 	figure()
+	# scatter(p_vecs[1, p], p_vecs[2, p], marker="x", s=45, zorder=1000, color="k")
 	scatter(m_vecs[1, :], m_vecs[2, :], c=A_n[:, p], s=25, 
 		vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+	# for colorbar to be right height
+	# https://stackoverflow.com/questions/18195758/set-matplotlib-colorbar-size-to-match-graph
+
 	if res.hp.k > 2
 		xlabel("UMAP dimension 1")
 		ylabel("UMAP dimension 2")
@@ -670,12 +717,15 @@ function color_latent_material_space(p::Int)
 	end
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
-	colorbar(label=prop_to_label[properties[p]], extend="both")
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
-	legend(title=@sprintf("θ = %.1f\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
-	gca().set_aspect("equal", "box")
+	legend(title=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ))
+	ax = gca()
+	ax.set_aspect("equal", "box")
+	divider = axes_grid1.make_axes_locatable(ax)
+	cax = divider.append_axes("right", size="5%", pad="2%")
+	colorbar(label=prop_to_label[properties[p]], extend="both", cax=cax)
 
 	savefig("latent_mat_space_$p.pdf", format="pdf")
 	tight_layout()
@@ -730,6 +780,9 @@ md"todo: color by void fraction etc."
 # ╔═╡ 0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 md"# loop over θs"
 
+# ╔═╡ 8395e26e-86c2-11eb-16e6-0126c44ff298
+DO_SIMS = false
+
 # ╔═╡ 5bbe8438-5f41-11eb-3d16-716bcb25400b
 begin
 	struct SparseResult
@@ -759,6 +812,9 @@ begin
 	end
 	
 	nb_sims = 50
+	if ! DO_SIMS
+		nb_sims = 0
+	end
 	θs = 0.1:0.1:0.9
 	θresults = []
 	pm = Progress(length(θs))
@@ -829,6 +885,7 @@ end
 
 # ╔═╡ Cell order:
 # ╠═92502b2a-7f83-11eb-152b-f10d7015d5cc
+# ╟─43935790-86c3-11eb-3b21-cde10d72855b
 # ╟─ae415fa4-5b82-11eb-0051-072097bb0439
 # ╠═b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 # ╟─bf9ed538-5b82-11eb-1198-3d35a209c5c0
@@ -873,7 +930,9 @@ end
 # ╠═ba8ce81e-5f80-11eb-3e39-f942cb6d0d1f
 # ╠═c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
 # ╠═8024beae-5f88-11eb-3e97-b7afbbbc6f5c
+# ╠═2b5e6c72-86c4-11eb-0f34-47ce8229002d
 # ╠═ab3a5568-5f88-11eb-373a-2f79bfce3cff
+# ╠═ab6a733c-86c3-11eb-0318-c19912136e3d
 # ╠═59a72a22-5f82-11eb-1424-0913e7830bc4
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═86b00b60-5f89-11eb-071f-bb364af09c2a
@@ -882,6 +941,7 @@ end
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
+# ╠═8395e26e-86c2-11eb-16e6-0126c44ff298
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
 # ╠═c7aa89b0-5f93-11eb-0503-5565bba9cb86
 # ╠═56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
