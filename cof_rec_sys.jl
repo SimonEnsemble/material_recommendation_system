@@ -115,25 +115,42 @@ begin
 	const materials = df[:, :Name] # names of the COFs
 	const n_m = length(materials)  # number of materials
 	const n_p = length(properties) # number of properties
+end
+
+# ╔═╡ 5a74052f-dee7-4d7c-9611-c8d5c09cc778
+md"""
+!!! warning "warning"
+in this notebook, we will work with the transpose of the material-property matrix in the paper. the reason is that `LowRankModels.jl` only allows offsets to be added to the columns [source](https://web.stanford.edu/~boyd/papers/pdf/glrm.pdf). so we will normalize the rows and add offsets to the columns.
+
+entry $(p, m)$ of the matrix $X:=A^\intercal$ in this code is entry $(m, p)$ of $A$ in the paper, which is property $p$ of material $m$.
+"""
+
+
+# ╔═╡ cd34bdd0-c427-407c-a7cd-155773b3a3c0
+begin	
+	# property-material matrix (un-normalized)
+	const X = collect(convert(Matrix, df[:, properties])')
+	@assert size(X) == (n_p, n_m)
 	
-	# material property matrix (un-normalized)
-	const A_complete_unnormalized = convert(Matrix, df[:, properties])
-	
-	# normalize columns to have:
-	#   mean zero
-	#   unit variance
-	A_n = deepcopy(A_complete_unnormalized)
-	for i = 1:n_p
-		A_n[:, i] = (A_n[:, i] .- mean(A_n[:, i])) ./ std(A_n[:, i])
+	function write_normalized_data_for_seaborn()
+		# normalize rows to have:
+		#   mean zero
+		#   unit variance
+		X_n = deepcopy(X)
+		for i = 1:n_p
+			X_n[i, :] = (X_n[i, :] .- mean(X_n[i, :])) ./ std(X_n[i, :])
+		end
+
+		# write normalized properties to a .csv file 
+		#   this is for visualization in seaborn_stuff.ipynb
+		df_n = DataFrame()
+		for p = 1:n_p
+			df_n[:, prop_to_label2[properties[p]]] = X_n[p, :]
+		end
+		@assert length(df_n[:, 1]) == n_m
+		CSV.write("normalized_props.csv", df_n)
 	end
-	
-	# write normalized properties to a .csv file 
-	#   this is for visualization in seaborn_stuff.ipynb
-	df_n = DataFrame()
-	for i = 1:n_p
-		df_n[:, prop_to_label2[properties[i]]] = A_n[:, i]
-	end
-	CSV.write("normalized_props.csv", df_n);
+	write_normalized_data_for_seaborn()
 end
 
 # ╔═╡ 6713990c-5b8d-11eb-2196-7182f36cad59
@@ -141,70 +158,47 @@ md"# simulate data collection"
 
 # ╔═╡ 2931005c-5b8d-11eb-2375-5dacf441be72
 """
-simulate the process of data collection, by randomly selecting (material, property) pairs in the matrix to uncover.
+simulate the process of data collection, by randomly selecting (property, material) pairs in the matrix to uncover.
 
 # arguments
 - θ: target fraction observed values
 
 # returns
-- A: un-normalized material-property matrix with missing entries
-- θ_true: the fraction of missing entries
+- X_θ: un-normalized property-material matrix with missing entries
+- ids_obs:     list of tuples corresponding to observed entries
+- ids_unobs: list of tuples corresponding to unobserved (missing) entries
 """
 function sim_data_collection(θ::Float64)
 	# number of observed entries
 	nb_observed = floor(Int, θ * n_m * n_p)
 	
 	# sample observed tuples
-    Ω = sample([(m, p) for m = 1:n_m, p = 1:n_p][:], nb_observed, replace=false)
+    ids_obs = sample([(p, m) for p=1:n_p, m=1:n_m][:], nb_observed, replace=false)
+	# the rest are unobserved
+	ids_unobs = [(p, m) for p=1:n_p, m=1:n_m if !((p, m) in ids_obs)][:]
 	
 	# construct the un-normalized, incomplete, material-property matrix
-    A = zeros(Union{Float64, Missing}, n_m, n_p)
-	fill!(A, missing) # default missing
+    X_θ = zeros(Union{Float64, Missing}, n_p, n_m)
+	fill!(X_θ, missing) # default missing
 	# fill in observed values
-	for (m, p) in Ω
-		A[m, p] = A_complete_unnormalized[m, p]
+	for (p, m) in ids_obs
+		X_θ[p, m] = X[p, m]
 	end
 	
-	# compute the actual fraction of observed entries.
-	θ_true = length(Ω) / (n_m * n_p)
-	
-    return A, θ_true
-end
-
-# ╔═╡ a21ac3b8-5ba1-11eb-2d70-bdf4b395f563
-"""
-given an incomplete material-property matrix, get list of entries that are observed and unobserved (missing) in terms of the tuples
-
-# arguments
-- A: incomplete material-property matrix
-
-# returns
-- ids_obs:     list of tuples corresponding to observed entries
-- ids_not_obs: list of tuples corresponding to unobserved (missing) entries
-"""
-function ids_obs_and_unobs(A::Array{Union{Float64, Missing}, 2})
-	@assert size(A) == (n_m, n_p)
-	# list of observed entries
-	ids_obs = observations(A)
-	# list of unobserved entries
-	ids_not_obs = [(m, p) for m=1:n_m, p=1:n_p if !((m, p) in ids_obs)][:]
-	
-	@assert length(ids_obs) + length(ids_not_obs) == n_m * n_p
-	return ids_obs, ids_not_obs
+    return X_θ, ids_obs, ids_unobs
 end
 
 # ╔═╡ 44be5768-d5d6-468a-ba5b-541a7f1213a9
 with_terminal() do 
 	@testset "data collection" begin
-		A, θ = sim_data_collection(0.9)
-		@test θ ≈ 0.9
+		X_θ, ids_obs, ids_unobs = sim_data_collection(0.9)
+		@test sum(.! ismissing.(X_θ)) / (n_m*n_p) ≈ 0.9
 		
-		A, θ = sim_data_collection(0.9)
-		@test ismissing.(A) !== ismissing.(A)
+		X_θ_new, _, _ = sim_data_collection(0.9)
+		@test ismissing.(X_θ_new) !== ismissing.(X_θ) # so it changes
 		
-		ids_obs, ids_not_obs = ids_obs_and_unobs(A)
-		@test all(.! ismissing.([A[m, p] for (m, p) in ids_obs]))
-		@test all(ismissing.([A[m, p] for (m, p) in ids_not_obs]))
+		@test all(.! ismissing.([X_θ[p, m] for (p, m) in ids_obs]))
+		@test all(   ismissing.([X_θ[p, m] for (p, m) in ids_unobs]))
 	end
 end
 
@@ -213,29 +207,29 @@ md"# normalization of columns"
 
 # ╔═╡ 2366b3cc-5b8f-11eb-07e4-61cbc97d5480
 """
-given an incomplete material-property matrix, normalize the columns such that they have mean zero and unit variance.
+given an incomplete property-material matrix, normalize the rows such that they have mean zero and unit variance. modifies the matrix X_θ passed to it.
 
 # arguments
-- A: incomplete material-property matrix
+- X_θ: incomplete property-material matrix
 
 # returns
-- μs: means of properties (among columns)
-- σs: standard deviations of properties (among columns)
-(both used for normalization of the columns.)
+- μs: means of properties
+- σs: standard deviations of properties
+(both used for normalization of the rows. return these to allow normalization of test data.)
 """
-function normalize!(A::Array{Union{Float64, Missing}, 2})
+function normalize!(X_θ::Array{Union{Float64, Missing}, 2})
 	# store means and standard deviations of the properties
 	μs = zeros(n_p)
 	σs = zeros(n_p)
 	# loop through properties.
     for p = 1:n_p
-		# get the observed rows.
-        ids_obs = .! ismissing.(A[:, p])
+		# get the observed columns = materials with this property
+        ids_obs = .! ismissing.(X_θ[p, :])
 		# compute mean and std of property (using observed values)
-		μs[p] = mean(A[ids_obs, p])
-		σs[p] = std(A[ids_obs, p])
-		# actually normalize the column.
-        A[:, p] .= (A[:, p] .- μs[p]) ./ σs[p]
+		μs[p] = mean(X_θ[p, ids_obs])
+		σs[p] =  std(X_θ[p, ids_obs])
+		# actually normalize the row.
+        X_θ[p, :] .= (X_θ[p, :] .- μs[p]) ./ σs[p]
     end
 	return μs, σs
 end
@@ -243,18 +237,18 @@ end
 # ╔═╡ b6a8b717-0f44-4eba-bff9-073079687dd9
 with_terminal() do 
 	@testset "column normalization" begin
-		A, θ = sim_data_collection(0.9)
+		X_θ, ids_obs, ids_unobs = sim_data_collection(0.9)
 		
-		# test using column 4.
-		ids_not_missing = .! ismissing.(A[:, 4])
+		# test using row 4.
+		ids_not_missing = .! ismissing.(X_θ[4, :])
 
-		μ4 = mean(A[ids_not_missing, 4])
-		σ4 = std( A[ids_not_missing, 4])
+		μ4 = mean(X_θ[4, ids_not_missing])
+		σ4 = std( X_θ[4, ids_not_missing])
 
-		μs, σs = normalize!(A)
+		μs, σs = normalize!(X_θ)
 
-		@test isapprox(mean(A[ids_not_missing, 4]), 0.0, atol=1e-10)
-		@test isapprox(std(A[ids_not_missing, 4]), 1.0, atol=1e-10)
+		@test isapprox(mean(X_θ[4, ids_not_missing]), 0.0, atol=1e-10)
+		@test isapprox( std(X_θ[4, ids_not_missing]), 1.0, atol=1e-10)
 		@test isapprox(μs[4], μ4)
 		@test isapprox(σs[4], σ4)
 	end
@@ -265,9 +259,11 @@ md"# matrix viz"
 
 # ╔═╡ 5ae47630-5f64-11eb-39f8-654f8d277674
 """
-visualize an incomplete material-property matrix.
+visualize an incomplete property-material matrix.
 """
-function viz_matrix(A::Array{Union{Float64, Missing}, 2}; θ::Float64)
+function viz_matrix(X_θ::Array{Union{Float64, Missing}, 2})
+	θ = sum(.! ismissing.(X_θ)) / (n_m * n_p) # compute θ
+	
 	norm = PyPlot.matplotlib.colors.Normalize(vmin=-3.0, vmax=3.0)
 	cmap = PyPlot.matplotlib.cm.get_cmap("PiYG") # diverging
 	
@@ -282,13 +278,13 @@ function viz_matrix(A::Array{Union{Float64, Missing}, 2}; θ::Float64)
 	
 	figure(figsize=(4, 15))
 	ax = gca()
-	is = imshow(a_to_color.(A), interpolation="None")
+	is = imshow(a_to_color.(X_θ'), interpolation="None")
 	xlabel("gas\nadsorption\nproperties")
 	ylabel("COFs")
 	xticks([])
 	yticks([])
-	ylim([-0.5, size(A)[1]-0.5])
-	xlim([-0.5, size(A)[2]-0.5])
+	ylim([-0.5, size(X_θ')[1]-0.5])
+	xlim([-0.5, size(X_θ')[2]-0.5])
 	colorbar(PyPlot.matplotlib.cm.ScalarMappable(norm=norm, cmap=cmap),
 		label=L"$A_{mp}$ (standardized)", extend="both", shrink=0.4)
 	title(@sprintf("θ = %.1f", θ), fontsize=12)
@@ -301,103 +297,44 @@ end
 md"# fit low rank model"
 
 # ╔═╡ 8a3c55ae-5ba4-11eb-3354-f9a8feaa7e91
+# data structure containing low rank model hyper-parameters
 struct HyperParam
-	k::Int
-	λ::Float64
-end
-
-# ╔═╡ b518d378-65ca-11eb-3bda-adcd26ccaa13
-begin
-	# denotes a regular grid of hyper-parameters
-	#   Cartesian product of ks and λs.
-	struct HPGrid
-		ks::Array{Int, 1}
-		λs::Array{Float64, 1}
-		n::Int
-	end
-	
-	# constructor sorts regularization params
-	#    to start with small regularization, move up to larger regularization
-	HPGrid(ks, λs) = HPGrid(ks, sort(λs), length(ks) * length(λs))
-end
-
-# ╔═╡ 1d745ea2-5ba5-11eb-274a-4ff7a65b0cb6
-# data structure for storing results of a validation run.
-struct ValidationRun
-	hyper_param::HyperParam   # hyper-parameters used in the validation run
-	rmsd::Float64             # root-mean-square-deviation
-	ρ::Float64                # Spearmann rank correlation coefficient
-end
-
-# ╔═╡ cc771288-5ba6-11eb-1792-9dfc54c58a8c
-"""
-return validation run that gave minimal RSMD
-"""
-function min_rmsd(vrs::Array{ValidationRun, 1})
-	best_vr = vrs[1]
-	for i = 2:length(vrs)
-		if vrs[i].rmsd < best_vr.rmsd
-			best_vr = vrs[i]
-		end
-	end
-	return best_vr
-end
-
-# ╔═╡ 080ce23a-6e32-11eb-14b0-c3d43725f78a
-"""
-return validation run that gave maximal ρ
-"""
-function max_ρ(vrs::Array{ValidationRun, 1})
-	best_vr = vrs[1]
-	for i = 2:length(vrs)
-		if vrs[i].ρ > best_vr.ρ
-			best_vr = vrs[i]
-		end
-	end
-	return best_vr
-end
-
-# ╔═╡ 0ff692ff-3df6-421a-a6aa-e1fde989e548
-with_terminal() do 
-	@testset "find optimal validation runs" begin
-		vrs = [ValidationRun(HyperParam(i, 1.0 * i), (i-3) ^ 2, i) for i=1:10]
-		@test min_rmsd(vrs) == vrs[3]
-		@test max_ρ(vrs) == vrs[end]
-	end
+	k::Int      # dimension of the latent space
+	λ::Float64  # regularization parameter in loss function
 end
 
 # ╔═╡ 8152d710-5b90-11eb-39f5-45d81aa298ab
 """
-fit a low rank model to an incomplete material-property matrix.
+fit a low rank model (lrm) to an incomplete property-material matrix.
 
 the low rank model is:
     A ≈ M ' * P + μ * 1'
 or
-    A'≈ P ' * M + 1 * μ '
+  X=A'≈ P ' * M + 1 * μ '
 (operates on transpose inside b/c LowRankModels.jl adds offsets to columns)
 
 # arguments
-- At: transpose of the material-property matrix (we hv to use the tranpose b/c LowRankModels.jl only allows an offset (bias) for the columns)
+- X_θ: incomplete property-material matrix. make sure it is normalized.
 - hp: hyper-parameters for the fit
-- ids_obs: list of observed entries
+- ids_obs: list of observed entries to fit the model to (don't compute from X_θ inside since we may wish to ignore a fraction of them during training)
 - P₀: initial guess for P
 - M₀: initial guess for M
 
 # returns
 - P: latent property vectors
 - M: latent material vectors
-- glrm: generalized low rank model
+- lrm: low rank model
 - ch: convergence history
 
 note: material bias is in the last row of M.
 """
-function fit_glrm(At::Array{Union{Float64, Missing}, 2}, 
-		          hp::HyperParam,
-		          ids_obs::Array{Tuple{Int64, Int64}, 1};
-				  P₀::Union{Array{Float64, 2}, Nothing}=nothing, 
-		          M₀::Union{Array{Float64, 2}, Nothing}=nothing)
+function fit_lrm(X_θ::Array{Union{Float64, Missing}, 2}, 
+		         hp::HyperParam,
+		         ids_obs::Array{Tuple{Int64, Int64}, 1};
+				 P₀::Union{Array{Float64, 2}, Nothing}=nothing, 
+		         M₀::Union{Array{Float64, 2}, Nothing}=nothing)
 	# assert we receive the transpose of the material-property matrix.
-	@assert size(At) == (n_p, n_m)
+	@assert size(X_θ) == (n_p, n_m)
 	
 	# quadratic regularizers on the latent vectors
     rp = QuadReg(hp.λ / n_p)
@@ -417,140 +354,199 @@ function fit_glrm(At::Array{Union{Float64, Missing}, 2},
 	#   for us: A  ≈ M' P
 	#      ==>  A' ≈ P' M
 	#   so... in LowRankModels.jl, X = P, Y = M
-    glrm = GLRM(At, QuadLoss(), rp, rm, hp.k + 1, 
+    lrm = GLRM(X_θ, QuadLoss(), rp, rm, hp.k + 1, 
 		        obs=ids_obs, offset=true, X=P₀, Y=M₀)
 #    init_svd!(glrm)
 	# fit the model.
-    P, M, ch = fit!(glrm)
+    P, M, ch = fit!(lrm)
 	
 	# some tests
     @assert size(P) == (hp.k + 1, n_p) # k + 1 b/c bias included.
     @assert size(M) == (hp.k + 1, n_m) # k + 1 b/c bias included.
-    @assert isapprox(impute(glrm), P' * M)
-    return P, M, glrm, ch
+    @assert isapprox(impute(lrm), P' * M)
+    return P, M, lrm, ch
+end
+
+# ╔═╡ 21995e36-5f69-11eb-0a95-13d0136099df
+"""
+fit a low rank model with only a bias term for the materials.
+
+# arguments
+- X_θ: incomplete property-material matrix. make sure it is normalized.
+- ids_obs: list of observed entries to fit the model to (don't compute from At inside since we may wish to ignore a fraction of them during training)
+"""
+function fit_bias_only_lrm(X_θ::Array{Union{Float64, Missing}, 2},
+		                   ids_obs::Array{Tuple{Int64,Int64}, 1})
+	hp = HyperParam(0, 0.0)
+	return fit_lrm(X_θ, hp, ids_obs)
 end
 
 # ╔═╡ 3aba3150-65cd-11eb-2c51-878ef71193ac
 with_terminal() do 
 	@testset "fitting GLRM" begin
-		A, θ = sim_data_collection(0.9)
-		ids_obs, ids_not_obs = ids_obs_and_unobs(A)
+		# begin
+		X_θ, ids_obs, ids_unobs = sim_data_collection(0.9)
 
-		At = collect(A')
 		hp = HyperParam(3, 0.4)
 
 		P₀ = randn(hp.k + 1, n_p)
 		M₀ = randn(hp.k + 1, n_m)
 
-		P, M, glrm, ch = fit_glrm(At, hp, observations(At), 
+		P, M, lrm, ch = fit_lrm(X_θ, hp, observations(X_θ), 
 			P₀=P₀, M₀=M₀)
+		# end
 		actualP = P[1:hp.k, :] # latent vecs only, without biases
 		actualM = M[1:hp.k, :] # latent vecs only, without biases
 		μ = M[end, :]
-		@test impute(glrm) ≈ P' * M
-		@test impute(glrm) ≈ actualP' * actualM + ones(n_p) * μ'
+		@test impute(lrm) ≈ P' * M # b/c it operates on A'
+		@test impute(lrm) ≈ actualP' * actualM + ones(n_p) * μ'
 		@test all(P[end, :] .≈ 1.0)
-		# model is A ≈ M' * P
-		@test size(A) == size(M' * P) == size(actualM' * actualP)
+		# model is X' = A ≈ M' * P
+		@test size(X_θ') == size(M' * P) == size(actualM' * actualP)
+		
+		# bias-only model
+		P, M, lrm, ch = fit_bias_only_lrm(X_θ, observations(X_θ))
+		@test size(M) == (1, n_m)
+		@test size(P) == (1, n_p)
+		@test impute(lrm) ≈ P' * M
 	end
-end
-
-# ╔═╡ 21995e36-5f69-11eb-0a95-13d0136099df
-function fit_bias_only_glrm(At::Array{Union{Float64, Missing}, 2},
-		                     obs::Array{Tuple{Int64,Int64}, 1})
-	hp = HyperParam(0, 0.0)
-	return fit_glrm(At, hp, obs)
 end
 
 # ╔═╡ e2dd554c-5baf-11eb-1b49-654d19bedecc
 md"# for evaluating the glrm"
 
 # ╔═╡ 168d4c44-5bb3-11eb-2d16-af69f613b625
-# get the true, normalized matrix
-function compute_At_complete(μs::Array{Float64, 1}, σs::Array{Float64, 1})
-	An = deepcopy(A_complete_unnormalized)
+"""
+compute the normalized, complete property-material matrix using the means and standard deviations of the properties that are provided (computed from train data).
+
+# arguments
+- μs: means of properties
+- σs: standard deviations of properties
+"""
+function compute_X_normalized(μs::Array{Float64, 1}, σs::Array{Float64, 1})
+	Xn = deepcopy(X)
 	for p = 1:n_p
-        An[:, p] .= (An[:, p] .- μs[p]) ./ σs[p]
+        Xn[p, :] .= (Xn[p, :] .- μs[p]) ./ σs[p]
     end
-	return collect(An')
+	return Xn
 end
 
 # ╔═╡ 36da7c1e-5bb1-11eb-2bc9-438dabcf9cc5
-# spearman rank for property p
-#    true A': true matrix
-#    pred A': imputed matrix
-#    ids_test: the test ids
-#    p: the property
-function ρ_p(𝓅::Int,
-		     At_complete::Array{Float64, 2},
-			 Ât::Array{Number, 2},
+"""
+compute the Spearmann rank correlation coefficient between the true values and predicted values for a given property.
+
+# arguments
+- p: the property
+- X_n: the true, complete property-material matrix (normalized)
+- X̂_n: the predicted property-material matrix (using normalized variables).
+- ids_test: the id's of the entries comprising the test set over which to compute the Spearmann rank correlation coefficient.
+
+# returns
+- ρ: the Spearmann rank corr coeff
+-
+"""
+function ρ_p(p::Int,
+		     X_n::Array{Float64, 2},
+			 X̂_n::Array{Number, 2},
 		     ids_test::Array{Tuple{Int64,Int64}, 1}
 		    )
-	@assert size(Ât) == (n_p, n_m)
+	@assert size(X_n) == size(X̂_n) == (n_p, n_m)
 	
-	ids_test_𝓅 = [(p, m) for (p, m) in ids_test if p == 𝓅]
+	# get all test data involving property p
+	ids_test_p = [(this_p, m) for (this_p, m) in ids_test if this_p == p]
 	
-	# truth and predicted value of the property
-	a = [At_complete[p, m] for (p, m) in ids_test_𝓅]
-	â = convert(Array{Float64, 1}, 
-		        [Ât[p, m] for (p, m) in ids_test_𝓅]
-		        )
+	# true values of the property
+	a = [X_n[p, m] for (p, m) in ids_test_p]
+	# predicted values of the property
+	â = [X̂_n[p, m] for (p, m) in ids_test_p]
 	return corspearman(a, â)
+end
+
+# ╔═╡ 3df2fa8d-760b-4081-8c68-b969a65922be
+with_terminal() do 
+	@testset "fitting GLRM" begin
+ 		@test ρ_p(1, convert(Array{Float64, 2}, X), convert(Array{Number, 2}, X), [(1, 1), (1, 4), (1, 5), (3, 5)]) ≈ 1.0
+	end
 end
 
 # ╔═╡ efc74f24-5ba0-11eb-2c44-6dac87ec534a
 md"# hyperparam grid sweep"
 
-# ╔═╡ a269ab26-5ba4-11eb-1001-6703f57f495c
-# hpgrid = HPGrid(collect(1:15),                       # ranks
-# 				10.0 .^ range(1.0, 3.0, length=25)  # reg params
-# 				)
+# ╔═╡ effc4d2b-303e-412c-806d-fc016c88756f
+# hyperparameter grid.
+#   important! 
+#     * rank k is outer loop
+#     * reg param λ starts small, gets larger
+hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=3), k = 1:3][:]
+# hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=25), k = 1:15][:]
 
 # ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
 
 
 # ╔═╡ 9cf75472-5ba0-11eb-371a-5bc338946b61
-# hyperparam sweep
-# return optimal hyperparams with min rmsd
-function hyperparam_sweep(hpgrid::HPGrid, 
-						  At::Array{Union{Float64, Missing}, 2},
+"""
+conduct a hyper-parameter sweep.
+loop over all hyper params in the hyper parameter grid, train a low rank model on train set, compute performance on validation set. return best hyper param values, judged by spearmann rank correlation coefficient.
+
+# arguments
+- hp_grid: the list of hyper params to try
+- X_θ: incomplete property-material matrix (must be normalized)
+- ids_train: entries that are training data
+- ids_valid: entries that are validation data
+- show_progress=false: shows a progress meter
+
+# returns
+- best_hp: best hyper params
+- best_ρ
+"""
+function hyperparam_sweep(hp_grid::HPGrid, 
+						  X_θ::Array{Union{Float64, Missing}, 2},
 						  ids_train::Array{Tuple{Int64,Int64},1},
 						  ids_valid::Array{Tuple{Int64,Int64},1};
 						  show_progress::Bool=false
 						 )
-	pm = Progress(hpgrid.n)
-	valid_runs = ValidationRun[]
-	sweep_no = 0
-	# order in loop is important
-	for k in hpgrid.ks
-		# for regularization path, start with smallest lambda
-		#     ;don't want to zero out any latent reps!
-		P = randn(k + 1, n_p) # initialize
-		M = randn(k + 1, n_m)
-		for λ in hpgrid.λs
-			sweep_no += 1
-			hyper_param = HyperParam(k, λ)
-			
-			if show_progress
-				update!(pm, sweep_no)
-			end
-			# train on training data
-			P, M, glrm, ch = fit_glrm(At, hyper_param, ids_train, P₀=P, M₀=M)
-			# impute missing entries
-			Ât = impute(glrm)
-			# evaluate on validation data
-			a = [At[p, m] for (p, m) in ids_valid]
-			â = [Ât[p, m] for (p, m) in ids_valid]
-
-			push!(valid_runs, ValidationRun(hyper_param, 
-											rmsd(a, â),
-											corspearman(a, â)
-										   )
-				  )
+	# set up progress meter
+	pm = Progress(length(hp_grid))
+	
+	# best hyper-param and Spearmann rank, ρ to return (keep over-writing)
+	best_hp = HyperParam(-1, Inf)
+	best_ρ = -Inf
+	
+	# initialize P, M
+	P = randn(hp_grid[1].k + 1, n_p)
+	M = randn(hp_grid[1].k + 1, n_m)
+	
+	# conduct sweep. r = run, hp = hyper parameter
+	for (r, hp) in enumerate(hp_grid)
+		# update P, M only if k changes
+		if (r > 1) & hp.k != hp_grid[r-1].k
+			P = randn(hp.k + 1, n_p)
+			M = randn(hp.k + 1, n_m)
+		end
+		
+		if show_progress
+			update!(pm, r)
+		end
+	
+		# train on training data
+		P, M, glrm, ch = fit_lrm(X_θ, hp, ids_train, P₀=P, M₀=M)
+		
+		# impute missing entries
+		X̂ = impute(glrm)
+		
+		# actual and predicted validation entries
+		a = [X_θ[p, m] for (p, m) in ids_valid]
+		â = [  X̂[p, m] for (p, m) in ids_valid]
+		
+		# compute spearman rank correl coeff on validation data
+		ρ = corspearman(a, â)
+		
+		if ρ > best_ρ
+			best_ρ = ρ
+			best_hp = hp
 		end
 	end
-	# return min_rmse(valid_runs)
-	return max_ρ(valid_runs)
+	return best_hp, best_ρ
 end
 
 # ╔═╡ 2009751a-5bae-11eb-158f-a3d9cb98fe24
@@ -577,25 +573,27 @@ struct Result
 end
 
 # ╔═╡ b285e2fe-5ba7-11eb-2e12-83e72bcafa2f
-# 1. simulate data collection
-# 2. split observed values into train and validation set
-# 3. remaining unobserved = test data
-# 4. do hyperparam sweep to find optimal hyperparams, judged by validation data
-# 5. now that we hv optimal hyper params, retrain on all observed.
-# 6. evaluate it on test entries
-#   return (true values, pred values)
+"""
+conduct a simulation by:
+1. simulating the data collection procedure which introduces missing values into the property-material matrix
+2. splitting observed values into train and validation set (the remaining unobserved = test data)
+3. do hyperparam sweep to find optimal hyperparams, judged by performance on validation data
+4. now that we hv optimal hyper params, retrain on all observed data (train + validation) to give deployment lrm
+5. evaluate deployment lrm (its imputations) on test entries
+6. return (true values, pred values)
+
+# arguments
+- θ: fraction missing entries
+- show_progress=false: progress bar
+"""
 function run_simulation(θ::Float64; show_progress::Bool=false)
-	###
-	#    set up data
-	###
-	A, θ_true = sim_data_collection(θ)
+	# generate incomplete property-material matrix
+	X_θ, ids_obs, ids_unobs = sim_data_collection(0.9)
 
-	# store for later.
-	μs, σs = normalize!(A)
+	# normalize rows; return mean, std of properties used in the normalization
+	μs, σs = normalize!(X_θ)
 
-	At = collect(A')
-	
-	# split into test/validation/train
+	# get the observed and unobserved values
 	ids_obs, ids_unobs = ids_obs_and_unobs(At)
 	ids_test = ids_unobs
 	@assert(all(ismissing.([At[p, m] for (p, m) in ids_test])))
@@ -750,7 +748,7 @@ of materials and properties together.
 "
 
 # ╔═╡ ba8ce81e-5f80-11eb-3e39-f942cb6d0d1f
-X = hcat(res.M[1:end-1, :], res.P[1:end-1, :])
+all_latent_vectors = hcat(res.M[1:end-1, :], res.P[1:end-1, :])
 
 # ╔═╡ c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
 begin
@@ -1044,9 +1042,10 @@ end
 # ╠═b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 # ╟─bf9ed538-5b82-11eb-1198-3d35a209c5c0
 # ╠═c5d42b2e-5b82-11eb-0631-35efb6b0800c
+# ╟─5a74052f-dee7-4d7c-9611-c8d5c09cc778
+# ╠═cd34bdd0-c427-407c-a7cd-155773b3a3c0
 # ╟─6713990c-5b8d-11eb-2196-7182f36cad59
 # ╠═2931005c-5b8d-11eb-2375-5dacf441be72
-# ╠═a21ac3b8-5ba1-11eb-2d70-bdf4b395f563
 # ╠═44be5768-d5d6-468a-ba5b-541a7f1213a9
 # ╟─1d363324-5b8f-11eb-2c78-6980a0d5f110
 # ╠═2366b3cc-5b8f-11eb-07e4-61cbc97d5480
@@ -1055,19 +1054,15 @@ end
 # ╠═5ae47630-5f64-11eb-39f8-654f8d277674
 # ╟─6ef474cc-5b90-11eb-2fe2-87bc7b48f5b7
 # ╠═8a3c55ae-5ba4-11eb-3354-f9a8feaa7e91
-# ╠═b518d378-65ca-11eb-3bda-adcd26ccaa13
-# ╠═1d745ea2-5ba5-11eb-274a-4ff7a65b0cb6
-# ╠═cc771288-5ba6-11eb-1792-9dfc54c58a8c
-# ╠═080ce23a-6e32-11eb-14b0-c3d43725f78a
-# ╠═0ff692ff-3df6-421a-a6aa-e1fde989e548
 # ╠═8152d710-5b90-11eb-39f5-45d81aa298ab
-# ╠═3aba3150-65cd-11eb-2c51-878ef71193ac
 # ╠═21995e36-5f69-11eb-0a95-13d0136099df
+# ╠═3aba3150-65cd-11eb-2c51-878ef71193ac
 # ╟─e2dd554c-5baf-11eb-1b49-654d19bedecc
 # ╠═168d4c44-5bb3-11eb-2d16-af69f613b625
 # ╠═36da7c1e-5bb1-11eb-2bc9-438dabcf9cc5
+# ╠═3df2fa8d-760b-4081-8c68-b969a65922be
 # ╟─efc74f24-5ba0-11eb-2c44-6dac87ec534a
-# ╠═a269ab26-5ba4-11eb-1001-6703f57f495c
+# ╠═effc4d2b-303e-412c-806d-fc016c88756f
 # ╟─2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
 # ╠═9cf75472-5ba0-11eb-371a-5bc338946b61
 # ╟─2009751a-5bae-11eb-158f-a3d9cb98fe24
