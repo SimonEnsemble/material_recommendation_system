@@ -6,9 +6,10 @@ using InteractiveUtils
 
 # ╔═╡ 92502b2a-7f83-11eb-152b-f10d7015d5cc
 begin
-	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, UMAP, PyCall, ProgressMeter, Random, Test, PlutoUI
+	using LowRankModels, CSV, DataFrames, PyPlot, Statistics, Distributions, StatsBase, Printf, PyCall, ProgressMeter, Random, Test, PlutoUI
 	
 	using ScikitLearn.CrossValidation: train_test_split
+	import GLM
 	
 	PyPlot.matplotlib.style.use("https://gist.githubusercontent.com/JonnyCBB/c464d302fefce4722fe6cf5f461114ea/raw/64a78942d3f7b4b5054902f2cee84213eaff872f/matplotlibrc")
 	
@@ -416,8 +417,8 @@ md"# hyperparam grid sweep"
 #   important! 
 #     * rank k is outer loop
 #     * reg param λ starts small, gets larger
-hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=3), k = 1:3][:]
-# hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=25), k = 1:15][:]
+#hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=3), k = 1:3][:]
+hp_grid = [HyperParam(k, λ) for λ in 10.0 .^ range(1.0, 3.0, length=25), k = 1:15][:]
 
 # ╔═╡ 2ff3b2f6-65db-11eb-156d-7fbcc6c79e76
 
@@ -550,10 +551,13 @@ struct Result
 	# the data
 	X_θ::Array{Union{Float64, Missing}, 2}
 	
-	# the depolyment model model
+	# the depolyment model
 	M::Array{Float64, 2}
 	P::Array{Float64, 2}
 	hp::HyperParam
+	
+	# the bias only model
+	μb::Array{Float64, 1}
 	
 	# true test data pts
 	a::Array{Float64, 1}
@@ -603,7 +607,7 @@ function run_simulation(θ::Float64; show_progress::Bool=false)
 
 	# train lrm with all observed data to give deployment lrm
 	P, M, lrm, ch = fit_lrm(X_θ, hp, ids_obs)
-	Gb, Mb, lrmb, chb = fit_bias_only_lrm(X_θ, ids_obs) # bias-only
+	Pb, Mb, lrmb, chb = fit_bias_only_lrm(X_θ, ids_obs) # bias-only
 	
 	# imputed matrices
 	X̂  = impute(lrm)
@@ -623,6 +627,7 @@ function run_simulation(θ::Float64; show_progress::Bool=false)
 	
 	return Result(X_θ, 
 		          M, P, hp,
+			      Mb[:],
 		          a, â, âb, 
 		          ρp, ρpb)
 end
@@ -725,14 +730,45 @@ begin
 	gcf()
 end
 
-# ╔═╡ b171c70f-30d5-4e31-bdac-ef7655ac19b3
+# ╔═╡ 78a5fdb0-4c6e-4453-ba0b-686310fa8fca
 begin
 	figure()
-	hist(μ)
-	ylabel("# COFs")
-	xlabel(L"material bias $\mu_m$")
+	scatter(μ, res.μb, s=5, facecolor="None", edgecolor="C0")
+	xlabel(L"material bias, $\mu_m$" * 
+		@sprintf(" (k = %d, λ = %.2f)", res.hp.k, res.hp.λ))
+	ylabel(L"material bias, $\mu_m$" * 
+		@sprintf(" (k = %d)", 0))
+	μ_max_min = [minimum(vcat(μ, res.μb)), maximum(vcat(μ, res.μb))] .+ 0.3
+	plot(μ_max_min, μ_max_min, color="k", linestyle="--")
+	xlim(μ_max_min)
+	ylim(μ_max_min)
+	gca().set_aspect("equal", "box")
+	legend(title=@sprintf("θ = %.1f", θ))
+	savefig("compare_material_biases.pdf", format="pdf")
+	gcf()
+end
+
+# ╔═╡ 28cb479a-f9af-4244-b54a-82c3ccb9829c
+begin
+	# dist'n of material bias term and interaction term to compare predictions
+	MTP = (res.M[1:end-1, :]' * res.P[1:end-1, :]) # interaction terms (w./o bias)
+	
+	figs, axs1 = subplots(2, 2, sharex="col", sharey="row", 
+		gridspec_kw=Dict("height_ratios"=>[1, 3.5], "width_ratios"=>[3.5, 1]))
+	axs1[1, 2].axis("off")
+	
+	axs1[2, 1].scatter([μ[m]      for m=1:n_m, p=1:n_p],
+		                [MTP[m, p] for m=1:n_m, p=1:n_p], s=4)
+	axs1[2, 1].set(xlabel=L"material bias, $\mu_m$", 
+		           ylabel=L"interaction term, $\mathbf{m}_m^\intercal\mathbf{p}_p$",
+	               xlim=[-3, 3], ylim=[-3, 3])
+	axs1[2, 1].legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
+	axs1[1, 1].hist(μ, color="C2", density=true, bins=range(-3.0, 3.0, length=25))
+	axs1[1, 1].set(yticks=[], ylabel="density")
+	axs1[2, 2].hist(MTP[:], orientation="horizontal", color="C3", density=true, bins=range(-3.0, 3.0, length=25))
+	axs1[2, 2].set(xticks=[], xlabel="density")
 	tight_layout()
-	savefig("distn_of_material_biases.pdf", format="pdf")
+	savefig("distn_of_mTp_and_mu.pdf", format="pdf")
 	gcf()
 end
 
@@ -802,8 +838,8 @@ function viz_prop_latent_space()
 	figure(figsize=(8, 8))
 	
 	if res.hp.k > 2
-		xlabel("principal component 1")
-		ylabel("principal component 2")
+		xlabel("PC 1")
+		ylabel("PC 2")
 	else
 		xlabel("latent dimension 1")
 		ylabel("latent dimension 2")
@@ -838,8 +874,8 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 	figure()
 	
 	if res.hp.k > 2
-		xlabel("principal component 1")
-		ylabel("principal component 2")
+		xlabel("PC 1")
+		ylabel("PC 2")
 	else
 		xlabel("latent dimension 1")
 		ylabel("latent dimension 2")
@@ -889,7 +925,7 @@ function color_latent_material_space()
 	for i = 1:3
 	# scatter(p_vecs[1, p], p_vecs[2, p], marker="x", s=45, zorder=1000, color="k")
 		plot_to_color = axs[i].scatter(
-			m_vecs[1, :], m_vecs[2, :], c=X_n[prop_ids_we_love[i], :], s=75, 
+			m_vecs[1, :], m_vecs[2, :], c=X_n[prop_ids_we_love[i], :], s=50, 
 			vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
 		
 		axs[i].axvline(x=0.0, color="lightgray", zorder=0)
@@ -901,9 +937,9 @@ function color_latent_material_space()
 	# https://stackoverflow.com/questions/18195758/set-matplotlib-colorbar-size-to-match-graph
 
 	# if res.hp.k > 2
-		axs[1].set_ylabel("principal component 2")
+		axs[1].set_ylabel("PC 2")
 		for i = 1:3
-			axs[i].set_xlabel("principal component 1")
+			axs[i].set_xlabel("PC 1")
 		end
 	# else
 	# 	xlabel("latent dimension 1")
@@ -913,7 +949,7 @@ function color_latent_material_space()
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
-	axs[3].legend(title=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ))
+	axs[3].legend(title=@sprintf("θ = %.1f\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	ax = gca()
 	
 	divider = axes_grid1.make_axes_locatable(ax)
@@ -940,8 +976,6 @@ function color_latent_material_space_all()
 			p += 1
 			da_plot = axs[i, j].scatter(m_vecs[1, :], m_vecs[2, :], c=X_n[p, :], s=25, 
 							  vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
-			# xlabel("UMAP dimension 1")
-			# ylabel("UMAP dimension 2")
 			axs[i, j].set_title(prop_to_label[properties[p]])
 			axs[i, j].set_aspect("equal", "box")
 			if (i == 4) & (j == 4)
@@ -975,7 +1009,7 @@ change the fraction of observed entries, see how performance depends on sparsity
 "
 
 # ╔═╡ 8395e26e-86c2-11eb-16e6-0126c44ff298
-DO_SIMS = true
+DO_SIMS = false
 
 # ╔═╡ 5bbe8438-5f41-11eb-3d16-716bcb25400b
 begin
@@ -1008,7 +1042,7 @@ end
 
 # ╔═╡ 3800cb64-8419-478b-b88b-f628bcc843f9
 begin
-	nb_sims = 3
+	nb_sims = 50
 	if ! DO_SIMS
 		nb_sims = 0
 	end
@@ -1082,10 +1116,35 @@ end
 
 # ╔═╡ 173f8c5d-18cc-4fd2-a0f8-d6f387092da6
 md"
-# bootstrapping
+# bootstrapping for uncertainty quantification
 "
 
+# ╔═╡ ba95a68d-a38f-4101-b1eb-c6ca4265ebd5
+# store results from a bootstrap run here.
+#   these results pertain to test data
+struct BootstrapRes
+	a_true::Array{Float64, 1}    # true values of the adsorption
+	a_pred::Array{Float64, 1}    # predicted values of adsorption
+	                             #  = mean among ensemble of predictor
+	σ_pred::Array{Float64, 1}    # predicted uncertainty
+								 #  = std among ensemble of predictors
+	residuals::Array{Float64, 1} # residuals (obs - pred)
+end
+
 # ╔═╡ 720186cc-dd8c-4ed8-92d5-c881174294e9
+"""
+use bootstrap sampling to obtain a mean and standard deviation of the prediction of the unobserved entries.
+
+# arguments
+- θ: fraction observed values
+- hp: hyper parameters to use
+- nb_bs: # bootstrap samples for estimating the mean and standard deviation
+
+# returns
+- â_μ: mean of the bootstrap predictions on the test data
+- â_σ: standard deviation of the bootstrap predictions of the test data
+- residuals: difference between true and mean of the bootstrap predictions on the test data
+"""
 function run_bootstrapping(θ::Float64, 
 		                   hp::HyperParam,
 						   nb_bs::Int)
@@ -1099,31 +1158,92 @@ function run_bootstrapping(θ::Float64,
 	X̂_true = compute_X_normalized(μs, σs)
 	
 	# the true values in the test set
-	a  = [X̂_true[p, m] for (p, m) in ids_test]
-
+	a_true = [X̂_true[p, m] for (p, m) in ids_test]
+	
+	# store bootstrap predictions of the test entries here.
+	a_pred = zeros(nb_bs, length(ids_test))
+	fill!(a_pred, NaN)
+	
 	for b = 1:nb_bs
 		# select bootstrap sample
 		ids_bs = sample(ids_obs, length(ids_obs), replace=true)
+		
 		# train lrm on bootstrap sample
 		P, M, lrm, ch = fit_lrm(X_θ, hp, ids_bs)
+		
 		# impute
 		X̂ = impute(lrm)
+		
 		# the predicted properties in the test set
-		â  = [X̂[p, m] for (p, m) in ids_test]
+		a_pred[b, :]  = [X̂[p, m] for (p, m) in ids_test]
 	end
+	bs_res = BootstrapRes(a_true,
+					  mean(a_pred, dims=1)[:],
+		              std(a_pred, dims=1)[:],
+		              a_true - mean(a_pred, dims=1)[:])
+	
+	# get mean, std, residual of predictions on test data.
+	@assert length(bs_res.a_pred) == length(ids_test) == length(bs_res.a_true) == length(bs_res.σ_pred)
+	return bs_res
 end
 
 # ╔═╡ ff0b78b4-ab6a-436d-8a81-f0bb76c3f67e
-run_bootstrapping(0.4, res.hp, 10)
+bs_res = run_bootstrapping(0.4, res.hp, 100)
+
+# ╔═╡ fd54e2fb-190f-44f7-9bfb-9e98df6a4eea
+begin
+	figure()
+	hist(bs_res.σ_pred, bins=35)
+	xlabel(L"$\sigma$ (predicted uncertainty)")
+	ylabel("# predictions")
+	title("sharpness")
+	gcf()
+end
+
+# ╔═╡ 7e733dea-f42f-4554-8826-0200bb5210a3
+begin
+	# sort by truth.
+	ids_sorted_by_truth = sortperm(bs_res.a_true)
+	
+	figure(figsize=(6.4*2, 4.8))
+	plot(1:length(bs_res.a_true), bs_res.a_true[ids_sorted_by_truth], 
+		linestyle="--", label="observed values")
+	errorbar(1:length(bs_res.a_true), bs_res.a_pred[ids_sorted_by_truth], 
+		     yerr=bs_res.σ_pred[ids_sorted_by_truth], lw=1,
+			 label="predicted intervals", linestyle="None")
+	xlabel("index (ordered by observed value)")
+	ylabel("adsorption property")
+	legend()
+	gcf()
+end
+
+# ╔═╡ 8b8a4ec7-725c-46bc-8fc7-b54dc9d833c6
+with_terminal() do
+	println("fraction of data that falls in μ +/- σ:", 
+		sum(abs.(bs_res.residuals) .< bs_res.σ_pred) / length(bs_res.σ_pred))
+end
 
 # ╔═╡ de4245dc-f9e4-42a5-958a-dd4235656ea7
-res.hp
-
-# ╔═╡ 07b5f0da-510f-428b-bcc9-d0d6d0b35689
-θ
-
-# ╔═╡ 050d0fd2-e138-4c0c-9edb-241059a39e12
-res.X_θ
+begin
+	max_resid = 3.5
+	max_std = 3.0
+	
+	figure()
+	scatter(clamp.(abs.(bs_res.residuals), -max_resid, max_resid), 
+		    clamp.(bs_res.σ_pred, 0.0, max_std), s=0.4
+		   )
+	gca().set_aspect("equal", "box")
+	# plot linear model
+	linear_model = GLM.lm(GLM.@formula(Y ~ X), DataFrame(X=abs.(bs_res.residuals), Y=bs_res.σ_pred))
+	rs = [0.0, max_resid]
+	β₀, β₁ = GLM.coef(linear_model)
+	plot(rs, β₀ .+ β₁ * rs, color="C1", linestyle="--")
+	xlabel("residual\n|truth - mean bootstrap prediction|")
+	ylabel("standard deviation\nof bootstrap predictions")
+	tight_layout()
+	savefig("bootstrap_plot.pdf", format="pdf")
+	gcf()
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1131,6 +1251,7 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
 LowRankModels = "15d4e49f-4837-5ea3-a885-5b28bfa376dc"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -1142,12 +1263,12 @@ ScikitLearn = "3646fa90-6ef7-5e7e-9f22-8aca16db6324"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-UMAP = "c4f8c510-2410-5be4-91d7-4fbaeb39457e"
 
 [compat]
 CSV = "~0.8.5"
 DataFrames = "~0.21.8"
 Distributions = "~0.23.12"
+GLM = "~1.5.1"
 LowRankModels = "~1.1.1"
 PlutoUI = "~0.7.1"
 ProgressMeter = "~1.7.1"
@@ -1155,7 +1276,6 @@ PyCall = "~1.92.3"
 PyPlot = "~2.9.0"
 ScikitLearn = "~0.6.4"
 StatsBase = "~0.33.8"
-UMAP = "~0.1.8"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -1164,12 +1284,6 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 [[ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
-
-[[ArnoldiMethod]]
-deps = ["LinearAlgebra", "Random", "StaticArrays"]
-git-tree-sha1 = "f87e559f87a45bece9c9ed97458d3afe98b1ebb9"
-uuid = "ec485272-7323-5ecc-a04f-4719b315124d"
-version = "0.1.0"
 
 [[Arpack]]
 deps = ["Arpack_jll", "Libdl", "LinearAlgebra"]
@@ -1283,12 +1397,6 @@ git-tree-sha1 = "214c3fcac57755cfda163d91c58893a8723f93e9"
 uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.0.2"
 
-[[Distances]]
-deps = ["LinearAlgebra", "Statistics", "StatsAPI"]
-git-tree-sha1 = "abe4ad222b26af3337262b8afb28fab8d215e9f8"
-uuid = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
-version = "0.10.3"
-
 [[Distributed]]
 deps = ["Random", "Serialization", "Sockets"]
 uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
@@ -1337,15 +1445,16 @@ version = "0.10.18"
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
+[[GLM]]
+deps = ["Distributions", "LinearAlgebra", "Printf", "Reexport", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "StatsModels"]
+git-tree-sha1 = "f564ce4af5e79bb88ff1f4488e64363487674278"
+uuid = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
+version = "1.5.1"
+
 [[IfElse]]
 git-tree-sha1 = "28e837ff3e7a6c3cdb252ce49fb412c8eb3caeef"
 uuid = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
 version = "0.1.0"
-
-[[Inflate]]
-git-tree-sha1 = "f5fc07d4e706b84f72d54eedcc1c13d92fb0871c"
-uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
-version = "0.1.2"
 
 [[InteractiveUtils]]
 deps = ["Markdown"]
@@ -1403,12 +1512,6 @@ uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
 [[Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 
-[[LightGraphs]]
-deps = ["ArnoldiMethod", "DataStructures", "Distributed", "Inflate", "LinearAlgebra", "Random", "SharedArrays", "SimpleTraits", "SparseArrays", "Statistics"]
-git-tree-sha1 = "432428df5f360964040ed60418dd5601ecd240b6"
-uuid = "093fc24a-ae57-5d10-9952-331d41423f4d"
-version = "1.3.5"
-
 [[LineSearches]]
 deps = ["LinearAlgebra", "NLSolversBase", "NaNMath", "Parameters", "Printf"]
 git-tree-sha1 = "f27132e551e959b3667d8c93eae90973225032dd"
@@ -1433,12 +1536,6 @@ deps = ["Arpack", "DataFrames", "LinearAlgebra", "NMF", "Optim", "Printf", "Rand
 git-tree-sha1 = "cc10bb134a2eb9e6f22d10fa1bba2b3a97c2b152"
 uuid = "15d4e49f-4837-5ea3-a885-5b28bfa376dc"
 version = "1.1.1"
-
-[[LsqFit]]
-deps = ["Distributions", "ForwardDiff", "LinearAlgebra", "NLSolversBase", "OptimBase", "Random", "StatsBase"]
-git-tree-sha1 = "b32b5549461fcb93bce223e264d4a7ef0c9923fd"
-uuid = "2fda8390-95c7-5789-9bda-21331edee243"
-version = "0.11.0"
 
 [[MacroTools]]
 deps = ["Markdown", "Random"]
@@ -1483,12 +1580,6 @@ git-tree-sha1 = "bfe47e760d60b82b66b61d2d44128b62e3a369fb"
 uuid = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
 version = "0.3.5"
 
-[[NearestNeighborDescent]]
-deps = ["DataStructures", "Distances", "LightGraphs", "Random", "Reexport", "SparseArrays"]
-git-tree-sha1 = "410580927bc16e156e5481d9318b8ca177c30f1b"
-uuid = "dd2c4c9e-a32f-5b2f-b342-08c2f244fce8"
-version = "0.3.4"
-
 [[NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
 
@@ -1507,12 +1598,6 @@ deps = ["Compat", "FillArrays", "LineSearches", "LinearAlgebra", "NLSolversBase"
 git-tree-sha1 = "d34366a3abc25c41f88820762ef7dfdfe9306711"
 uuid = "429524aa-4258-5aef-a3af-852621145aeb"
 version = "1.3.0"
-
-[[OptimBase]]
-deps = ["NLSolversBase", "Printf", "Reexport"]
-git-tree-sha1 = "9cb1fee807b599b5f803809e85c81b582d2009d6"
-uuid = "87e2bd06-a317-5318-96d9-3ecbac512eee"
-version = "2.0.2"
 
 [[OrderedCollections]]
 git-tree-sha1 = "85f8e6578bf1f9ee0d11e7bb1b1456435479d47c"
@@ -1653,11 +1738,10 @@ uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 deps = ["Distributed", "Mmap", "Random", "Serialization"]
 uuid = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
 
-[[SimpleTraits]]
-deps = ["InteractiveUtils", "MacroTools"]
-git-tree-sha1 = "5d7e3f4e11935503d3ecaf7186eac40602e7d231"
-uuid = "699a6c99-e7fa-54fc-8d76-47d257e15c1d"
-version = "0.9.4"
+[[ShiftedArrays]]
+git-tree-sha1 = "22395afdcf37d6709a5a0766cc4a5ca52cb85ea0"
+uuid = "1277b4bf-5013-50f5-be3d-901d8477a67a"
+version = "1.0.0"
 
 [[Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
@@ -1711,6 +1795,12 @@ git-tree-sha1 = "30cd8c360c54081f806b1ee14d2eecbef3c04c49"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "0.9.8"
 
+[[StatsModels]]
+deps = ["DataAPI", "DataStructures", "LinearAlgebra", "Printf", "ShiftedArrays", "SparseArrays", "StatsBase", "StatsFuns", "Tables"]
+git-tree-sha1 = "dfdf16cc1e531e154c7e62cd42d531e00f8d100e"
+uuid = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
+version = "0.6.23"
+
 [[StructTypes]]
 deps = ["Dates", "UUIDs"]
 git-tree-sha1 = "e36adc471280e8b346ea24c5c87ba0571204be7a"
@@ -1749,12 +1839,6 @@ uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 [[Test]]
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[[UMAP]]
-deps = ["Arpack", "Distances", "LinearAlgebra", "LsqFit", "NearestNeighborDescent", "Random", "SparseArrays"]
-git-tree-sha1 = "c96f3a85e8d429129714a1363e622a4cb9936c79"
-uuid = "c4f8c510-2410-5be4-91d7-4fbaeb39457e"
-version = "0.1.8"
 
 [[UUIDs]]
 deps = ["Random", "SHA"]
@@ -1825,7 +1909,8 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═53585188-5f6f-11eb-0fc0-abbd20ee33fe
 # ╠═74068408-5f70-11eb-02ba-417e847034c4
 # ╠═8548a48c-5f73-11eb-3d4f-550078ec546a
-# ╠═b171c70f-30d5-4e31-bdac-ef7655ac19b3
+# ╠═78a5fdb0-4c6e-4453-ba0b-686310fa8fca
+# ╠═28cb479a-f9af-4244-b54a-82c3ccb9829c
 # ╠═ce346a40-667c-11eb-03d3-eb7c4510ff26
 # ╠═1568fe16-667e-11eb-0ecc-bfd712234906
 # ╟─b0560c02-5f80-11eb-338b-c9cc48b741af
@@ -1850,10 +1935,12 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═56bb9b5c-5f95-11eb-0d3f-97cd4b7a48a0
 # ╠═0830c1de-5f9e-11eb-132a-77b3084102b2
 # ╟─173f8c5d-18cc-4fd2-a0f8-d6f387092da6
+# ╠═ba95a68d-a38f-4101-b1eb-c6ca4265ebd5
 # ╠═720186cc-dd8c-4ed8-92d5-c881174294e9
 # ╠═ff0b78b4-ab6a-436d-8a81-f0bb76c3f67e
+# ╠═fd54e2fb-190f-44f7-9bfb-9e98df6a4eea
+# ╠═7e733dea-f42f-4554-8826-0200bb5210a3
+# ╠═8b8a4ec7-725c-46bc-8fc7-b54dc9d833c6
 # ╠═de4245dc-f9e4-42a5-958a-dd4235656ea7
-# ╠═07b5f0da-510f-428b-bcc9-d0d6d0b35689
-# ╠═050d0fd2-e138-4c0c-9edb-241059a39e12
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
