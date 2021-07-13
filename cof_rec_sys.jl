@@ -756,9 +756,10 @@ begin
 	figs, axs1 = subplots(2, 2, sharex="col", sharey="row", 
 		gridspec_kw=Dict("height_ratios"=>[1, 3.5], "width_ratios"=>[3.5, 1]))
 	axs1[1, 2].axis("off")
-	
-	axs1[2, 1].scatter([μ[m]      for m=1:n_m, p=1:n_p],
-		                [MTP[m, p] for m=1:n_m, p=1:n_p], s=4)
+
+	axs1[2, 1].scatter([μ[m]      for m=1:n_m, p=1:n_p if ismissing(res.X_θ[p, m])],
+		               [MTP[m, p] for m=1:n_m, p=1:n_p if ismissing(res.X_θ[p, m])], s=4)
+	# only plot for the missing values
 	axs1[2, 1].set(xlabel=L"material bias, $\mu_m$", 
 		           ylabel=L"interaction term, $\mathbf{m}_m^\intercal\mathbf{p}_p$",
 	               xlim=[-3, 3], ylim=[-3, 3])
@@ -911,7 +912,7 @@ viz_prop_latent_space()
 
 # ╔═╡ ab6a733c-86c3-11eb-0318-c19912136e3d
 begin
-	prop_ids_we_love = [11, 13, 14]
+	prop_ids_we_love = [11, 14, 13]
 	viz_prop_latent_space_some(prop_ids_we_love)
 end
 
@@ -950,11 +951,14 @@ function color_latent_material_space()
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
 	axs[3].legend(title=@sprintf("θ = %.1f\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
-	ax = gca()
+
+	figs.subplots_adjust(right=0.8)
+	cbar_ax = figs.add_axes([1.0, 0.075, 0.02, 0.7])
+	figs.colorbar(plot_to_color, label="standardized property value", extend="both", cax=cbar_ax)
 	
-	divider = axes_grid1.make_axes_locatable(ax)
-	cax = divider.append_axes("right", size="7%", pad="4%")
-	colorbar(plot_to_color, label="standardized property value", extend="both", cax=cax)
+	# divider = axes_grid1.make_axes_locatable(ax)
+	# cax = divider.append_axes("right", size="5%", pad="4%")
+	# colorbar(plot_to_color, label="standardized property value", extend="both", cax=cax)
 	suptitle("map of COFs", fontsize=25)
 	tight_layout()
 	savefig("latent_mat_space_few.pdf", format="pdf")
@@ -1009,7 +1013,7 @@ change the fraction of observed entries, see how performance depends on sparsity
 "
 
 # ╔═╡ 8395e26e-86c2-11eb-16e6-0126c44ff298
-DO_SIMS = false
+DO_SIMS = true
 
 # ╔═╡ 5bbe8438-5f41-11eb-3d16-716bcb25400b
 begin
@@ -1217,10 +1221,41 @@ begin
 	gcf()
 end
 
-# ╔═╡ 8b8a4ec7-725c-46bc-8fc7-b54dc9d833c6
-with_terminal() do
-	println("fraction of data that falls in μ +/- σ:", 
-		sum(abs.(bs_res.residuals) .< bs_res.σ_pred) / length(bs_res.σ_pred))
+# ╔═╡ 195fd38a-41e8-48ae-94a6-e419ff7a813b
+begin
+	std_normal = Normal(0, 1)
+	
+	fraction_σs = range(0.0, 10.0, length=100)
+	
+	function compute_area(pred_prop_in_interval, actual_prop_in_interval)
+		# area under curve
+		the_area = 0.0
+		for i = 1:length(fraction_σs)-1
+			Δx = pred_prop_in_interval[i+1] - pred_prop_in_interval[i]
+			the_area += Δx * (actual_prop_in_interval[i+1] + actual_prop_in_interval[i]) / 2
+		end
+		return 0.5 - the_area
+	end
+	pred_prop_in_interval = zeros(length(fraction_σs))
+	actual_prop_in_interval = zeros(length(fraction_σs))
+	for (i, fraction_σ) in enumerate(fraction_σs)
+		# probability data in μ +/- fraction_σ * σ
+		pred_prop_in_interval[i] = cdf(std_normal, fraction_σ) - cdf(std_normal, -fraction_σ)
+		actual_prop_in_interval[i] = sum(abs.(bs_res.residuals) .< fraction_σ * bs_res.σ_pred) / length(bs_res.residuals)
+	end
+	figure()
+	plot([0, 1], [0, 1], linestyle="--", color="k")
+	fill_between(pred_prop_in_interval, actual_prop_in_interval, pred_prop_in_interval, color="C0", alpha=0.3)
+	text(0.6, 0.1, @sprintf("miscalibration area = %.2f", 
+		compute_area(pred_prop_in_interval, actual_prop_in_interval)),
+		ha="center", va="center")
+	plot(pred_prop_in_interval, actual_prop_in_interval)
+	gca().set_aspect("equal", "box")
+	xlabel("prediction proportion in interval")
+	ylabel("actual proportion in interval")
+	title("calibration")
+	savefig("calibration_uncertainty.pdf", format="pdf")
+	gcf()
 end
 
 # ╔═╡ de4245dc-f9e4-42a5-958a-dd4235656ea7
@@ -1244,6 +1279,15 @@ begin
 	savefig("bootstrap_plot.pdf", format="pdf")
 	gcf()
 end
+
+# ╔═╡ 144487d4-e9a5-4e4a-89bb-6c63ebfb188e
+# uncertainty toolbox
+# using NPZ
+
+# npzwrite("for_uncertainty_metrics.npz", 
+# 	Dict("predictions" => bs_res.a_pred, 
+# 		"predictions_std" => bs_res.σ_pred, 
+# 		"y" => bs_res.a_true))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1940,7 +1984,8 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═ff0b78b4-ab6a-436d-8a81-f0bb76c3f67e
 # ╠═fd54e2fb-190f-44f7-9bfb-9e98df6a4eea
 # ╠═7e733dea-f42f-4554-8826-0200bb5210a3
-# ╠═8b8a4ec7-725c-46bc-8fc7-b54dc9d833c6
+# ╠═195fd38a-41e8-48ae-94a6-e419ff7a813b
 # ╠═de4245dc-f9e4-42a5-958a-dd4235656ea7
+# ╠═144487d4-e9a5-4e4a-89bb-6c63ebfb188e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
