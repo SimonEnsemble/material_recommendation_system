@@ -391,6 +391,7 @@ with_terminal() do
 
 		P, M, lrm, ch = fit_lrm(X_θ, hp, observations(X_θ), 
 			P₀=P₀, M₀=M₀)
+		@time fit_lrm(X_θ, HyperParam(10, 0.4), observations(X_θ))
 		# end
 		actualP = P[1:hp.k, :] # latent vecs only, without biases
 		actualM = M[1:hp.k, :] # latent vecs only, without biases
@@ -892,7 +893,7 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 			)
 			)
 	end
-	adjustText.adjust_text(texts, force_text=0.02, force_points=3.0)
+	adjustText.adjust_text(texts, force_text=0.03, force_points=3.5)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
@@ -901,7 +902,7 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
-	title("map of adsorption propeties")
+	title("map of adsorption propeties", fontsize=20, fontweight="bold")
 	tight_layout()
 	savefig("prop_latent_space_few.pdf", format="pdf")
 	gcf()
@@ -919,7 +920,6 @@ end
 # ╔═╡ 59a72a22-5f82-11eb-1424-0913e7830bc4
 function color_latent_material_space()
 	X_n = compute_X_normalized(mean(X, dims=2)[:], std(X, dims=2)[:])
-	
 	
 	figs, axs = subplots(1, 3, figsize=(6.4*1.4, 4.8), sharey=true)
 	plot_to_color = nothing
@@ -955,11 +955,7 @@ function color_latent_material_space()
 	figs.subplots_adjust(right=0.8)
 	cbar_ax = figs.add_axes([1.0, 0.075, 0.02, 0.7])
 	figs.colorbar(plot_to_color, label="standardized property value", extend="both", cax=cbar_ax)
-	
-	# divider = axes_grid1.make_axes_locatable(ax)
-	# cax = divider.append_axes("right", size="5%", pad="4%")
-	# colorbar(plot_to_color, label="standardized property value", extend="both", cax=cax)
-	suptitle("map of COFs", fontsize=25)
+	suptitle("map of COFs", fontsize=20, fontweight="bold")
 	tight_layout()
 	savefig("latent_mat_space_few.pdf", format="pdf")
 	
@@ -989,8 +985,12 @@ function color_latent_material_space_all()
 				
 				# fig.colorbar(da_plot, ax=axs[:, :], shrink=0.6)
 			end
-			axs[i, j].set_xlabel("PC1")
-			axs[i, j].set_ylabel("PC2")
+			if i == 4
+				axs[i, j].set_xlabel("PC1")
+			end
+			if j == 1
+				axs[i, j].set_ylabel("PC2")
+			end
 			axs[i, j].axvline(x=0.0, color="lightgray", zorder=0)
 			axs[i, j].axhline(y=0.0, color="lightgray", zorder=0)
 		end
@@ -1201,6 +1201,8 @@ begin
 	xlabel(L"$\sigma$ (predicted uncertainty)")
 	ylabel("# predictions")
 	title("sharpness")
+	tight_layout()
+	savefig("sharpness.pdf", format="pdf")
 	gcf()
 end
 
@@ -1217,7 +1219,11 @@ begin
 			 label="predicted intervals", linestyle="None")
 	xlabel("index (ordered by observed value)")
 	ylabel("adsorption property")
+	ylim([-5, 5])
 	legend()
+	title("boostrap confidence intervals")
+	tight_layout()
+	savefig("sorted_bootstrap_intervals.pdf", format="pdf")
 	gcf()
 end
 
@@ -1251,7 +1257,7 @@ begin
 		ha="center", va="center")
 	plot(pred_prop_in_interval, actual_prop_in_interval)
 	gca().set_aspect("equal", "box")
-	xlabel("prediction proportion in interval")
+	xlabel("predicted proportion in interval")
 	ylabel("actual proportion in interval")
 	title("calibration")
 	savefig("calibration_uncertainty.pdf", format="pdf")
