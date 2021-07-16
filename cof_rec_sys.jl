@@ -982,7 +982,7 @@ function color_latent_material_space()
 	figs.colorbar(plot_to_color, label="standardized property value", extend="both", cax=cbar_ax)
 	suptitle("map of COFs", fontsize=20, fontweight="bold")
 	tight_layout()
-	savefig("latent_mat_space_few.pdf", format="pdf")
+	savefig("latent_mat_space_few.pdf", format="pdf", bbox_inches="tight")
 	
 	gcf()
 end
