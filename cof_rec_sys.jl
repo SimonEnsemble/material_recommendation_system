@@ -747,10 +747,10 @@ end
 begin
 	figure()
 	scatter(μ, res.μb, s=5, facecolor="None", edgecolor="C0")
-	xlabel(L"material bias, $\mu_m$" * 
-		@sprintf(" (k = %d, λ = %.2f)", res.hp.k, res.hp.λ))
-	ylabel(L"material bias, $\mu_m$" * 
-		@sprintf(" (k = %d)", 0))
+	xlabel(L"material bias, $\mu_m$" * "\n" *
+		L"$A_{mp}\approx\mathbf{m}_m^\intercal\mathbf{p}_p+\mu_m$ " *  @sprintf("(k = %d, λ = %.2f)", res.hp.k, res.hp.λ))
+	ylabel(L"material bias, $\mu_m$" * "\n" * L"$A_{mp}\approx\mu_m$"
+		)
 	μ_max_min = [minimum(vcat(μ, res.μb)), maximum(vcat(μ, res.μb))] .+ 0.3
 	plot(μ_max_min, μ_max_min, color="k", linestyle="--")
 	xlim(μ_max_min)
@@ -856,7 +856,17 @@ end
 
 # ╔═╡ a1a20abe-62bf-4a02-9e48-f45aa350ff0e
 # reconstruction error, RMSE:
-sqrt(mean((all_latent_vectors .- impute(pca_model)) .^ 2))
+with_terminal() do
+	println("relative reconstruction error |A - Ã|_F / |A|_F= ", 
+		sqrt(sum((all_latent_vectors .- impute(pca_model)) .^ 2)) / sqrt(sum(all_latent_vectors .^ 2))
+	)
+end
+
+# ╔═╡ 4a8798c9-cf5c-4ab4-b46f-ead819f8e7b7
+begin
+	latent_prop_space_max = 2.0
+	latent_mat_space_max = 4.2
+end
 
 # ╔═╡ 8024beae-5f88-11eb-3e97-b7afbbbc6f5c
 function viz_prop_latent_space()
@@ -882,13 +892,15 @@ function viz_prop_latent_space()
 			)
 			)
 	end
-	adjustText.adjust_text(texts, force_text=0.01, force_points=0.01)
+	adjustText.adjust_text(texts, force_text=0.5, force_points=4.5)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
 	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
+	xlim([-latent_prop_space_max, latent_prop_space_max])
+	ylim([-latent_prop_space_max, latent_prop_space_max])
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	tight_layout()
@@ -918,16 +930,18 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 			)
 			)
 	end
-	adjustText.adjust_text(texts, force_text=0.03, force_points=3.5)
+	adjustText.adjust_text(texts, force_text=3.0, force_points=6.5)
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
-	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ), loc="best")
+	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ), loc="lower right")
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
 	gca().set_aspect("equal", "box")
 	title("map of adsorption propeties", fontsize=20, fontweight="bold")
+	xlim([-latent_prop_space_max, latent_prop_space_max])
+	ylim([-latent_prop_space_max, latent_prop_space_max])
 	tight_layout()
 	savefig("prop_latent_space_few.pdf", format="pdf")
 	gcf()
@@ -958,6 +972,8 @@ function color_latent_material_space()
 		axs[i].axhline(y=0.0, color="lightgray", zorder=0)
 		axs[i].set_aspect("equal", "box")
 		axs[i].set_title("color:\n" * replace(prop_to_label[properties[prop_ids_we_love[i]]], "\n" => " "))
+		axs[i].set_xlim([-latent_mat_space_max, latent_mat_space_max])
+		axs[i].set_ylim([-latent_mat_space_max, latent_mat_space_max])
 	end
 	# for colorbar to be right height
 	# https://stackoverflow.com/questions/18195758/set-matplotlib-colorbar-size-to-match-graph
@@ -1000,7 +1016,7 @@ function color_latent_material_space_all()
 		for j = 1:4
 			p += 1
 			da_plot = axs[i, j].scatter(m_vecs[1, :], m_vecs[2, :], c=X_n[p, :], s=25, 
-							  vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k")
+							  vmin=-3.0, vmax=3.0, cmap="PiYG", edgecolor="k", lw=1)
 			axs[i, j].set_title(prop_to_label[properties[p]])
 			axs[i, j].set_aspect("equal", "box")
 			if (i == 4) & (j == 4)
@@ -1018,6 +1034,8 @@ function color_latent_material_space_all()
 			end
 			axs[i, j].axvline(x=0.0, color="lightgray", zorder=0)
 			axs[i, j].axhline(y=0.0, color="lightgray", zorder=0)
+			axs[i, j].set_xlim([-latent_mat_space_max, latent_mat_space_max])
+			axs[i, j].set_ylim([-latent_mat_space_max, latent_mat_space_max])
 		end
 	end
 	suptitle("COF map colored by adsorption properties", fontsize=23)
@@ -1038,7 +1056,7 @@ change the fraction of observed entries, see how performance depends on sparsity
 "
 
 # ╔═╡ 8395e26e-86c2-11eb-16e6-0126c44ff298
-DO_SIMS = true
+DO_SIMS = false
 
 # ╔═╡ 5bbe8438-5f41-11eb-3d16-716bcb25400b
 begin
@@ -2000,6 +2018,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═227a2198-6d29-405a-9df8-54491c08b044
 # ╠═c6caaa48-5f7f-11eb-3853-fdffcd51b2d5
 # ╠═a1a20abe-62bf-4a02-9e48-f45aa350ff0e
+# ╠═4a8798c9-cf5c-4ab4-b46f-ead819f8e7b7
 # ╠═8024beae-5f88-11eb-3e97-b7afbbbc6f5c
 # ╠═2b5e6c72-86c4-11eb-0f34-47ce8229002d
 # ╠═ab3a5568-5f88-11eb-373a-2f79bfce3cff
