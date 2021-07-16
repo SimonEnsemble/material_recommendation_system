@@ -26,7 +26,7 @@ md"# read in data"
 
 # ╔═╡ b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 begin
-	df = CSV.read("aiida_ads_data_oct20.csv", DataFrame)
+	df = CSV.read("aiida_ads_data_june21.csv", DataFrame)
 	df[:, :cof] = map(c -> split(c, ".cif")[1], df[:, :cof])
 	
 	# log-10 transform the henry coefficients.
@@ -39,7 +39,7 @@ begin
 	
 	# cof common names
 	#  https://github.com/danieleongari/CURATED-COFs/blob/master/cof-frameworks.csv
-	df_names = CSV.read("cof-frameworks.csv", DataFrame)
+	df_names = CSV.read("cof-frameworks_new.csv", DataFrame)
 	rename!(df_names, Symbol("CURATED-COFs ID") => :cof)
 	df_names = df_names[:, [:cof, :Name]]
 	
@@ -112,6 +112,12 @@ begin
 	const materials = df[:, :Name] # names of the COFs
 	const n_m = length(materials)  # number of materials
 	const n_p = length(properties) # number of properties
+end
+
+# ╔═╡ 22db8636-952f-459c-8eeb-2ad125e9993b
+with_terminal() do
+	println("# COFs: ", n_m)
+	println("# props: ", n_p)
 end
 
 # ╔═╡ 5a74052f-dee7-4d7c-9611-c8d5c09cc778
@@ -189,7 +195,7 @@ end
 with_terminal() do 
 	@testset "data collection" begin
 		X_θ, ids_obs, ids_unobs = sim_data_collection(0.9)
-		@test sum(.! ismissing.(X_θ)) / (n_m*n_p) ≈ 0.9
+		@test isapprox(sum(.! ismissing.(X_θ)) / (n_m*n_p), 0.9, atol=0.001)
 		
 		X_θ_new, _, _ = sim_data_collection(0.9)
 		@test ismissing.(X_θ_new) !== ismissing.(X_θ) # so it changes
@@ -438,7 +444,7 @@ loop over all hyper params in the hyper parameter grid, train a low rank model o
 
 # returns
 - best_hp: best hyper params
-- best_ρ
+- best_rmsd
 """
 function hyperparam_sweep(hp_grid::Array{HyperParam, 1}, 
 						  X_θ::Array{Union{Float64, Missing}, 2},
@@ -451,7 +457,7 @@ function hyperparam_sweep(hp_grid::Array{HyperParam, 1},
 	
 	# best hyper-param and Spearmann rank, ρ to return (keep over-writing)
 	best_hp = HyperParam(-1, Inf)
-	best_ρ = -Inf
+	best_performance_metric = Inf # want to be low (rmsd)
 	
 	# initialize P, M
 	P = randn(hp_grid[1].k + 1, n_p)
@@ -479,15 +485,16 @@ function hyperparam_sweep(hp_grid::Array{HyperParam, 1},
 		a = [X_θ[p, m] for (p, m) in ids_valid]
 		â = [  X̂[p, m] for (p, m) in ids_valid]
 		
-		# compute spearman rank correl coeff on validation data
-		ρ = corspearman(a, â)
+		# compute rmsd on validation data
+		performance_metric = rmsd(a, â)
+		# ρ = corspearman(a, â)
 		
-		if ρ > best_ρ
-			best_ρ = ρ
+		if performance_metric < best_performance_metric
+			best_performance_metric = performance_metric
 			best_hp = hp
 		end
 	end
-	return best_hp, best_ρ
+	return best_hp, best_performance_metric
 end
 
 # ╔═╡ 2009751a-5bae-11eb-158f-a3d9cb98fe24
@@ -664,10 +671,15 @@ begin
 	plot([-6, 6], [-6, 6], 
 		linestyle="--", color="gray")
 	# text(4, -4, 
-	legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f\n\nperformance:\nρ = %.2f\nRMSE = %.2f", θ, res.hp.k, res.hp.λ, corspearman(res.a, res.â), rmsd(res.a, res.â)))
+	legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f\n\nperformance:\nMAE = %.2f\nRMSE = %.2f\nR² = %.2f", θ, 
+			res.hp.k, res.hp.λ,
+			mean(abs.(res.a .- res.â)),
+			rmsd(res.a, res.â),
+			1-sum((res.a .- res.â).^2)/sum((res.a .- mean(res.a)).^2)
+			)
 		# ha="center", va="center"
-		# )
-	colorbar(label="# (COF, adsorption property) pairs")
+		  )
+	colorbar(label="# (COF, adsorption property) values")
 	gca().set_aspect("equal", "box")
 	tight_layout()
 	savefig("parity_plot.pdf", format="pdf")
@@ -681,10 +693,10 @@ begin
 		
 	figure(figsize=(10, 4.8))
 	bar(1:n_p, res.ρp[ids_props_sorted], 
-		label=@sprintf("θ = %.1f, k = %d, λ = %.2f", θ, res.hp.k, res.hp.λ)
+		label=L"$A_{mp} \approx \mathbf{m}_m^\intercal\mathbf{p}_p + \mu_m$" * @sprintf("\n(k = %d, λ = %.2f)", res.hp.k, res.hp.λ)
 	)
 	scatter(1:n_p, res.ρpb[ids_props_sorted], marker="*", zorder=100, s=160, 
-		    ec="k", label=@sprintf("θ = %.1f, k = 0", θ)
+		    ec="k", label=L"$A_{mp} \approx \mu_m$"
 	)
 	xlim([0.5, n_p+0.5])
 	xticks(1:n_p, [prop_to_label[p] for p in properties[ids_props_sorted]], rotation=90)
@@ -693,7 +705,7 @@ begin
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center"
 	# 	)
-	legend()
+	legend(title=@sprintf("θ = %.1f", θ), bbox_to_anchor=(0.875, 0.7))
 	ylim([-0.1, 1.0])
 	tight_layout()
 	savefig("rho_per_gas.pdf", format="pdf")
@@ -721,7 +733,7 @@ begin
 	xlim([0, 2 * n_show + n_space + 2])
 	# ylim([-4.25, 4.25])
 	xlabel("COF")
-	ylabel(L"material bias, $\mu_i$")
+	ylabel(L"material bias, $\mu_m$")
 	legend(title=@sprintf("θ = %.1f\n\nhyperparams:\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	
 	scatter((n_show+1):(n_show+n_space), zeros(3), color="k")
@@ -780,6 +792,19 @@ df[ids_sort, [:cof, :Name]][1:3, :]
 # ╔═╡ 1568fe16-667e-11eb-0ecc-bfd712234906
 # bottom materals
 df[ids_sort, [:cof, :Name]][end-2:end, :]
+
+# ╔═╡ 07b0f3dc-8f05-4ab9-9c46-233049cb6aaa
+with_terminal() do 
+	# copy for viz
+	for i = 1:3
+		cof_id   = df[ids_sort, [:cof, :Name]][i, :cof]
+		cof_name = df[ids_sort, [:cof, :Name]][i, :Name]
+		println("cp cifs/$cof_id.cif for_rec_sys/$cof_name.cif")
+		cof_id   = df[ids_sort, [:cof, :Name]][end-2:end, :][i, :cof]
+		cof_name = df[ids_sort, [:cof, :Name]][end-2:end, :][i, :Name]
+		println("cp cifs/$cof_id.cif for_rec_sys/$cof_name.cif")
+	end
+end
 
 # ╔═╡ b0560c02-5f80-11eb-338b-c9cc48b741af
 md"### learn latent space
@@ -950,7 +975,7 @@ function color_latent_material_space()
 	# text(-3, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center")
-	axs[3].legend(title=@sprintf("θ = %.1f\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
+	axs[3].legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 
 	figs.subplots_adjust(right=0.8)
 	cbar_ax = figs.add_axes([1.0, 0.075, 0.02, 0.7])
@@ -1084,10 +1109,12 @@ function viz_ρp_vsθ()
 		ρb_avg = [mean([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		ρb_std = [std([res.ρpb[p] for res in θresults[i]]) for i = 1:length(θs)]
 		
-		ax.plot(θs, ρ_avg, marker="o", clip_on=false, markeredgecolor="k")
+		ax.plot(θs, ρ_avg, marker="o", clip_on=false, markeredgecolor="k",
+			label=(p==16) ? L"$A_{mp}\approx \mathbf{m}_m^\intercal \mathbf{p}_p+\mu_m$" : nothing)
 		ax.fill_between(θs, ρ_avg .- ρ_std, ρ_avg .+ ρ_std, alpha=0.3, clip_on=false)
 		
-		ax.plot(θs, ρb_avg, marker="*", clip_on=false, markeredgecolor="k")
+		ax.plot(θs, ρb_avg, marker="*", clip_on=false, markeredgecolor="k",
+			label=(p==16) ? L"$A_{mp}\approx \mu_m$" : nothing)
 		ax.fill_between(θs, ρb_avg .- ρb_std, ρb_avg .+ ρb_std, alpha=0.3)
 		
 		ax.set_title(prop_to_label2[properties[p]], fontsize=14)
@@ -1096,6 +1123,7 @@ function viz_ρp_vsθ()
 	for ax in axs
 		ax.set_xticks([0.0, 0.5, 1.0])
 	end
+	legend(bbox_to_anchor=(1.0, 0.5))
 	
 	tight_layout()
 	savefig("rho_vs_theta.pdf", format="pdf")
@@ -1181,9 +1209,11 @@ function run_bootstrapping(θ::Float64,
 		# the predicted properties in the test set
 		a_pred[b, :]  = [X̂[p, m] for (p, m) in ids_test]
 	end
+	
+	# store results
 	bs_res = BootstrapRes(a_true,
-					  mean(a_pred, dims=1)[:],
-		              std(a_pred, dims=1)[:],
+					  mean(a_pred, dims=1)[:], # mean over ensemble of predictors
+		              std(a_pred, dims=1)[:],  # std over ensemble of predictors
 		              a_true - mean(a_pred, dims=1)[:])
 	
 	# get mean, std, residual of predictions on test data.
@@ -1287,7 +1317,7 @@ begin
 end
 
 # ╔═╡ 144487d4-e9a5-4e4a-89bb-6c63ebfb188e
-# uncertainty toolbox
+# uncertainty toolbox to check
 # using NPZ
 
 # npzwrite("for_uncertainty_metrics.npz", 
@@ -1926,6 +1956,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═b3deec9e-5b82-11eb-0e37-abd2ac9d4b44
 # ╟─bf9ed538-5b82-11eb-1198-3d35a209c5c0
 # ╠═c5d42b2e-5b82-11eb-0631-35efb6b0800c
+# ╠═22db8636-952f-459c-8eeb-2ad125e9993b
 # ╟─5a74052f-dee7-4d7c-9611-c8d5c09cc778
 # ╠═cd34bdd0-c427-407c-a7cd-155773b3a3c0
 # ╟─6713990c-5b8d-11eb-2196-7182f36cad59
@@ -1963,6 +1994,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═28cb479a-f9af-4244-b54a-82c3ccb9829c
 # ╠═ce346a40-667c-11eb-03d3-eb7c4510ff26
 # ╠═1568fe16-667e-11eb-0ecc-bfd712234906
+# ╠═07b0f3dc-8f05-4ab9-9c46-233049cb6aaa
 # ╟─b0560c02-5f80-11eb-338b-c9cc48b741af
 # ╠═ba8ce81e-5f80-11eb-3e39-f942cb6d0d1f
 # ╠═227a2198-6d29-405a-9df8-54491c08b044
