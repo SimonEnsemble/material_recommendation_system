@@ -1347,8 +1347,11 @@ now, however, 10% of the materials are popular and 10% are unpopular.
 - X_θ: un-normalized property-material matrix with missing entries
 - ids_obs:     list of tuples corresponding to observed entries
 - ids_unobs: list of tuples corresponding to unobserved (missing) entries
+- material_class: list of class (average, popular, or unpopular) to which the materials belong.
 """
 function sim_biased_data_collection()
+	Random.seed!(my_seed);
+	
 	# fraction observed entries for different materials
 	θ = Dict("average"    => 0.4, 
 		     "popular"    => 0.9, 
@@ -1404,13 +1407,18 @@ end
 
 # ╔═╡ 8193eb82-d064-4790-a784-c59e9c74d397
 function selection_bias_study()
+	# observe incomplete matrix with selection bias
 	X_θ, ids_obs, ids_unobs, material_class = sim_biased_data_collection()
-	
+	# normalize
 	μs, σs = normalize!(X_θ)
+	# get true matrix, using normalization from observations
 	X_true = compute_X_normalized(μs, σs)
+	# use same hyper-params as the main θ = 0.4 study
 	hp = res.hp
+	# fit low rank model, impute
 	P, M, lrm, ch = fit_lrm(X_θ, hp, ids_obs)
 	X̂ = impute(lrm)
+	# get predictions, true values among test set (unobserved)
 	â = [X̂[p, m] for (p, m) in ids_unobs]
 	a = [X_true[p, m] for (p, m) in ids_unobs]
 	c = [material_class[m] for (p, m) in ids_unobs]
@@ -1434,7 +1442,7 @@ function selection_bias_study()
 	end
 	suptitle(@sprintf("θ = %.2f, hyperparams: k = %d, λ = %.2f",
 			sum(.! ismissing.(X_θ))/n_m/n_p,
-			hp.k, hp.λ), y=0.9
+			hp.k, hp.λ), y=0.8
 		)
 	tight_layout()
 	savefig("selection_bias_study.pdf", format="pdf")
