@@ -757,6 +757,7 @@ begin
 	ylim(μ_max_min)
 	gca().set_aspect("equal", "box")
 	legend(title=@sprintf("θ = %.1f", θ))
+	tight_layout()
 	savefig("compare_material_biases.pdf", format="pdf")
 	gcf()
 end
@@ -883,19 +884,9 @@ function viz_prop_latent_space()
 	end
 	texts = []
 	for p = 1:n_p
-		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color=cs[p], marker="s")
-		push!(texts, 
-			annotate(prop_to_label[properties[p]], 
-				(p_vecs[1, p], p_vecs[2, p]), 
-				fontsize=10, ha="center", color=cs[p]
-				# arrowprops=Dict(:facecolor="gray", :shrink=0.05)
-			)
-			)
+		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", 
+			color=cs[p], marker="s", label=prop_to_label[properties[p]])
 	end
-	adjustText.adjust_text(texts, force_text=0.5, force_points=4.5)
-	# text(-2, 4.5, 
-	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
-	# 	ha="center", va="center", fontsize=20)
 	legend(title=@sprintf("θ = %.1f\n\nk = %d\nλ = %.2f", θ, res.hp.k, res.hp.λ))
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
@@ -996,7 +987,7 @@ function color_latent_material_space()
 	figs.subplots_adjust(right=0.8)
 	cbar_ax = figs.add_axes([1.0, 0.075, 0.02, 0.7])
 	figs.colorbar(plot_to_color, label="standardized property value", extend="both", cax=cbar_ax)
-	suptitle("map of COFs", fontsize=20, fontweight="bold")
+	suptitle("map of COFs", fontsize=20, fontweight="bold", y=0.9, x=0.54)
 	tight_layout()
 	savefig("latent_mat_space_few.pdf", format="pdf", bbox_inches="tight")
 	
@@ -1342,6 +1333,116 @@ end
 # 	Dict("predictions" => bs_res.a_pred, 
 # 		"predictions_std" => bs_res.σ_pred, 
 # 		"y" => bs_res.a_true))
+
+# ╔═╡ 54f8f209-0ffe-410b-bc74-da59424adc8b
+md"# selection bias"
+
+# ╔═╡ 8f623a53-5fe2-4a27-8ac7-d9857489a57b
+"""
+simulate the process of data collection, by randomly selecting (property, material) pairs in the matrix to uncover.
+
+now, however, 10% of the materials are popular and 10% are unpopular.
+
+# returns
+- X_θ: un-normalized property-material matrix with missing entries
+- ids_obs:     list of tuples corresponding to observed entries
+- ids_unobs: list of tuples corresponding to unobserved (missing) entries
+"""
+function sim_biased_data_collection()
+	# fraction observed entries for different materials
+	θ = Dict("average"    => 0.4, 
+		     "popular"    => 0.9, 
+		     "unpopular"  => 0.1
+	        )
+	
+	# fraction of materials
+	fraction_materials = Dict("average"    => 0.8,
+		                      "popular"    => 0.1,
+		                      "unpopular"  => 0.1
+							  )
+	
+	# determine material class
+	material_class = ["average" for _ = 1:n_m]
+	for i = 1:n_m
+		three_sided_coin = rand()
+		if three_sided_coin < fraction_materials["popular"]
+			material_class[i] = "popular"
+		elseif three_sided_coin < fraction_materials["popular"] + fraction_materials["unpopular"]
+			material_class[i] = "unpopular"
+		end
+	end
+	println("# popular materials: ", sum(material_class .== "popular"))
+	println("# unpopular materials: ", sum(material_class .== "unpopular"))
+	
+	# sample observed tuples
+    ids_obs = Tuple{Int, Int}[]
+	# the rest are unobserved
+	ids_unobs = Tuple{Int, Int}[]
+	
+	# construct the un-normalized, incomplete, material-property matrix
+    X_θ = zeros(Union{Float64, Missing}, n_p, n_m)
+	fill!(X_θ, missing) # default missing
+	for m = 1:n_m
+		for p = 1:n_p
+			if rand() < θ[material_class[m]]
+				push!(ids_obs, (p, m))
+				X_θ[p, m] = X[p, m]
+			else
+				push!(ids_unobs, (p, m))
+			end
+		end
+	end
+	for mat_class in ["average", "popular", "unpopular"]
+		ids_this_class = material_class .== mat_class
+		println("fraction missing ", 
+			mat_class, " ", 
+			sum(ismissing.(X_θ[:, ids_this_class])) / (sum(ids_this_class)*n_p))
+	end
+	
+    return X_θ, ids_obs, ids_unobs, material_class
+end
+
+# ╔═╡ 8193eb82-d064-4790-a784-c59e9c74d397
+function selection_bias_study()
+	X_θ, ids_obs, ids_unobs, material_class = sim_biased_data_collection()
+	
+	μs, σs = normalize!(X_θ)
+	X_true = compute_X_normalized(μs, σs)
+	hp = res.hp
+	P, M, lrm, ch = fit_lrm(X_θ, hp, ids_obs)
+	X̂ = impute(lrm)
+	â = [X̂[p, m] for (p, m) in ids_unobs]
+	a = [X_true[p, m] for (p, m) in ids_unobs]
+	c = [material_class[m] for (p, m) in ids_unobs]
+	
+	fig, axs = subplots(1, 3, sharex=true, sharey=true, figsize=(6.4*1.5, 4.8))
+	for (i, mat_class) in enumerate(["average", "popular", "unpopular"])
+		axs[i].set(xlabel=L"true $A_{mp}$", 
+			       ylabel=L"predicted $A_{mp}$",
+			       title=mat_class * " COFs")
+		axs[i].set_aspect("equal", "box")
+		ids_class = c .== mat_class
+		axs[i].plot([-3, 5], [-3, 5], linestyle="--", color="k")
+		axs[i].scatter(a[ids_class], â[ids_class], c="C$i", s=5, facecolor="None")
+		axs[i].legend(title=@sprintf("\nMAE = %.2f\nRMSE = %.2f\nR² = %.2f",
+			mean(abs.(a[ids_class] .- â[ids_class])),
+			rmsd(a[ids_class], â[ids_class]),
+			1-sum((a[ids_class] .- â[ids_class]).^2)/sum((a[ids_class] .- mean(a[ids_class])).^2)
+			)
+		# ha="center", va="center"
+		  )
+	end
+	suptitle(@sprintf("θ = %.2f, hyperparams: k = %d, λ = %.2f",
+			sum(.! ismissing.(X_θ))/n_m/n_p,
+			hp.k, hp.λ), y=0.9
+		)
+	tight_layout()
+	savefig("selection_bias_study.pdf", format="pdf")
+	gcf()
+end
+
+# ╔═╡ b76fe0df-62c0-4f04-9e25-26e7af4a81a6
+selection_bias_study()
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2044,5 +2145,9 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═195fd38a-41e8-48ae-94a6-e419ff7a813b
 # ╠═de4245dc-f9e4-42a5-958a-dd4235656ea7
 # ╠═144487d4-e9a5-4e4a-89bb-6c63ebfb188e
+# ╟─54f8f209-0ffe-410b-bc74-da59424adc8b
+# ╠═8f623a53-5fe2-4a27-8ac7-d9857489a57b
+# ╠═8193eb82-d064-4790-a784-c59e9c74d397
+# ╠═b76fe0df-62c0-4f04-9e25-26e7af4a81a6
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
