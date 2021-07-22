@@ -14,7 +14,7 @@ the result of the query-- the simulated adsorption data for this project-- is co
 
 ## training the low rank models
 
-`cof_rec_sys.jl` is a Pluto notebook with Julia code to train and evaluate the low rank models of the COF--gas-adsorption-property matrix and visualize the results. use Julia v1.6 and Pluto 0.15.1. Pluto will automatically install the required Julia packages for you. see [here](https://github.com/fonsp/Pluto.jl) and [here](https://julialang.org/) for more information on Pluto and Julia, respectively.
+`cof_rec_sys.jl` is a Pluto notebook with Julia v1.6 code to train and evaluate the low rank models of the COF--gas-adsorption-property matrix and visualize the results. use Julia v1.6 and Pluto 0.15.1. Pluto will automatically install the required Julia packages for you. see [here](https://github.com/fonsp/Pluto.jl) and [here](https://julialang.org/) for more information on Pluto and Julia, respectively.
 
 the Pluto notebook is commented and functions annotated to understand it.
 
