@@ -865,7 +865,7 @@ end
 
 # ╔═╡ 4a8798c9-cf5c-4ab4-b46f-ead819f8e7b7
 begin
-	latent_prop_space_max = 2.0
+	latent_prop_space_max = 4.2
 	latent_mat_space_max = 4.2
 end
 
@@ -910,18 +910,21 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 		xlabel("latent dimension 1")
 		ylabel("latent dimension 2")
 	end
+	offsets = Dict(11 => (-1.0, -0.25), 14 => (0.53, 0.52), 13 => (1, 0))
 	texts = []
 	for p in which_props
 		scatter(p_vecs[1, p], p_vecs[2, p], edgecolor="k", color="C5", marker="s")
 		push!(texts, 
 			annotate(prop_to_label[properties[p]], 
-				(p_vecs[1, p], p_vecs[2, p]), 
-				fontsize=10, ha="center", color="C5"
-				# arrowprops=Dict(:facecolor="gray", :shrink=0.05)
+				(p_vecs[1, p] + offsets[p][1], p_vecs[2, p] + offsets[p][2]), 
+				fontsize=10, ha="center", color="C5", va="center"
+				 # arrowprops=Dict(:facecolor=>"None", :shrink=>0.05)
 			)
 			)
 	end
-	adjustText.adjust_text(texts, force_text=3.0, force_points=6.5)
+	# adjustText.adjust_text(texts)# , precision=0.001,
+	# expand_text=(1.01, 1.55), expand_points=(1.01, 1.55),
+	# force_text=(1.0, 5.0), force_points=(1.0, 5.0))
 	# text(-2, 4.5, 
 	# 	@sprintf("hyperparameters:\nk = %d\nλ = %.2f", res.hp.k, res.hp.λ),
 	# 	ha="center", va="center", fontsize=20)
@@ -929,10 +932,11 @@ function viz_prop_latent_space_some(which_props::Array{Int64, 1})
 	axvline(x=0.0, color="lightgray", zorder=0)
 	axhline(y=0.0, color="lightgray", zorder=0)
 	# colorbar(label=prop_to_label[properties[p]], extend="both")
-	gca().set_aspect("equal", "box")
+
 	title("map of adsorption propeties", fontsize=20, fontweight="bold")
 	xlim([-latent_prop_space_max, latent_prop_space_max])
 	ylim([-latent_prop_space_max, latent_prop_space_max])
+	gca().set_aspect("equal", "box")
 	tight_layout()
 	savefig("prop_latent_space_few.pdf", format="pdf")
 	gcf()
@@ -1038,8 +1042,11 @@ end
 # ╔═╡ 2e523504-65e4-11eb-1cbc-fd2cb39afed6
 color_latent_material_space_all()
 
-# ╔═╡ 55ee1330-6508-11eb-37d1-1973f7e077ed
-md"todo: color by void fraction etc."
+# ╔═╡ 757d07f3-78ac-4521-b1d3-f2f257ffc186
+with_terminal() do
+	id_outlier = findfirst(m_vecs[1, :] .> 3.0)
+	println("the outlier is: ", m_vecs[:, id_outlier], "cof", materials[id_outlier])
+end
 
 # ╔═╡ 0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 md"# loop over θs
@@ -2136,7 +2143,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═b0619008-5f86-11eb-11b6-c7a3c4db9fd3
 # ╠═244ce106-65e4-11eb-080b-f52f27e435fc
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
-# ╟─55ee1330-6508-11eb-37d1-1973f7e077ed
+# ╠═757d07f3-78ac-4521-b1d3-f2f257ffc186
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═8395e26e-86c2-11eb-16e6-0126c44ff298
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
