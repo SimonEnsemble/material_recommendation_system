@@ -581,6 +581,12 @@ struct Result
 	
 	# gas-wise Spearman rank coeffs bias only
 	ρpb::Array{Float64, 1}
+	
+	# the true normalized property-material matrix
+	X̂_true
+	# means and sigmas to un-normalize
+	μs
+	σs
 end
 
 # ╔═╡ b285e2fe-5ba7-11eb-2e12-83e72bcafa2f
@@ -637,7 +643,9 @@ function run_simulation(θ::Float64; show_progress::Bool=false)
 		          M, P, hp,
 			      Mb[:],
 		          a, â, âb, 
-		          ρp, ρpb)
+		          ρp, ρpb,
+				  X̂_true, μs, σs
+	)
 end
 
 # ╔═╡ 5d38b414-5f41-11eb-14b9-73a9007fc263
@@ -1046,6 +1054,58 @@ color_latent_material_space_all()
 with_terminal() do
 	id_outlier = findfirst(m_vecs[1, :] .> 3.0)
 	println("the outlier is: ", m_vecs[:, id_outlier], "cof", materials[id_outlier])
+end
+
+# ╔═╡ 6d5ff200-36d3-4861-9ed8-6e76b0fc1e79
+md"what about Xe/Kr selectivity? error propogation study.
+"
+
+# ╔═╡ 5723a30f-2564-4b76-a8c7-38d0e7a71ff4
+begin
+	function xe_kr_selectivity_error_prop_study()
+		# find ID of property that is Xe and Kr Henry coeff
+		id_henry = Dict()
+		for gas in ["xe", "kr"]
+			id_henry[gas] = findfirst(properties .== gas * "_henry")
+		end
+
+		# which materials have both missing? this will be test data.
+		id_both_xe_kr_missing = ismissing.(res.X_θ[id_henry["xe"], :]) .& ismissing.(res.X_θ[id_henry["kr"], :])
+		
+		# pred Xe/kr selectivity follows from the imputed matrix
+		X_pred = res.P' * res.M + ones(n_p) * res.μb'
+		
+		actual_values = Dict()
+		pred_values   = Dict()
+		
+		for gas in ["xe", "kr"]
+			actual_values[gas] = res.μs[id_henry[gas]] .+ convert(Array{Float64}, 
+				res.X̂_true[id_henry[gas], id_both_xe_kr_missing] * res.σs[id_henry[gas]]
+			)
+		end
+		actual_values["xe/kr"] = actual_values["xe"] ./ actual_values["kr"]
+		
+		for gas in ["xe", "kr"]
+			pred_values[gas] = res.μs[id_henry[gas]] .+ convert(Array{Float64}, 
+				X_pred[id_henry[gas], id_both_xe_kr_missing] * res.σs[id_henry[gas]]
+			)
+		end
+		pred_values["xe/kr"] = pred_values["xe"] ./ pred_values["kr"]
+
+		names_of_bars = [prop_to_label[properties[id_henry["xe"]]], prop_to_label[properties[id_henry["kr"]]], "Xe/Kr selectivity\n(300 K)"]
+
+		figure()
+		bar(1:3, [corspearman(actual_values["xe"], pred_values["xe"]),	
+				  corspearman(actual_values["kr"], pred_values["kr"]),
+				  corspearman(actual_values["xe/kr"], pred_values["xe/kr"])]
+				)
+		xticks(1:3, names_of_bars)
+		ylabel(L"Spearman's rank correlation coefficient $\rho$")
+		tight_layout()
+		savefig("error_prop_xe_kr.pdf", format="pdf")
+		gcf()
+	end
+	xe_kr_selectivity_error_prop_study()
 end
 
 # ╔═╡ 0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
@@ -2144,6 +2204,8 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═244ce106-65e4-11eb-080b-f52f27e435fc
 # ╠═2e523504-65e4-11eb-1cbc-fd2cb39afed6
 # ╠═757d07f3-78ac-4521-b1d3-f2f257ffc186
+# ╟─6d5ff200-36d3-4861-9ed8-6e76b0fc1e79
+# ╠═5723a30f-2564-4b76-a8c7-38d0e7a71ff4
 # ╟─0cd6cd76-5f6e-11eb-0bf5-2f0ea61ef29b
 # ╠═8395e26e-86c2-11eb-16e6-0126c44ff298
 # ╠═5bbe8438-5f41-11eb-3d16-716bcb25400b
