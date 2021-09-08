@@ -2,7 +2,7 @@
 
 this repo contains all data and code to reproduce all plots in our article:
 
-:evergreen_tree: A. Sturluson, A. Raza, G. McConachie, D. Siderius, X. Fern, C. Simon. "A recommendation system to predict missing adsorption properties of nanoporous materials." [ChemRxiv preprint](https://chemrxiv.org/engage/chemrxiv/article-details/60c757ab337d6cfa42e2906d).
+:evergreen_tree: A. Sturluson, A. Raza, G. McConachie, D. Siderius, X. Fern, C. Simon. "A recommendation system to predict missing adsorption properties of nanoporous materials." _Chemistry of Materials._ (2021) [link](https://pubs.acs.org/doi/10.1021/acs.chemmater.1c01201). [ChemRxiv preprint](https://chemrxiv.org/engage/chemrxiv/article-details/60c757ab337d6cfa42e2906d).
 
 ## querying AiiDA for data regarding simulated gas adsorption in COFs
 
